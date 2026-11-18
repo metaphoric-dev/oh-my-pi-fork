@@ -452,10 +452,7 @@ Average Latency: 1,240 ms
 			expect(open[2]!.some(line => line.includes("…"))).toBe(true);
 			// Closing the cell never shrinks the table, and every word of the label shows.
 			expect(closed.length).toBeGreaterThanOrEqual(height);
-			const shown = closed
-				.join(" ")
-				.replace(/[│|]/g, " ")
-				.split(/\s+/);
+			const shown = closed.join(" ").replace(/[│|]/g, " ").split(/\s+/);
 			expect(label.split(" ").every(word => shown.includes(word))).toBe(true);
 		});
 

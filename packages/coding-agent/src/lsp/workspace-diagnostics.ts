@@ -225,7 +225,8 @@ async function runProjectDiagnostics(cwd: string, projectType: ProjectType, sign
 				// tsc/cargo/pyright report diagnostics and still falls through to
 				// the branch below. Mirrors the exit-status gate
 				// `resolveGoWorkspaceDiagnosticsCommand` already applies above.
-				return interpretEmptyDiagnosticsResult(exitCode, proc.signalCode, command);
+				const signalCode = typeof proc.signalCode === "string" ? proc.signalCode : null;
+				return interpretEmptyDiagnosticsResult(exitCode, signalCode, command);
 			}
 			// Limit output length. The cap is per language so a noisy checker
 			// cannot crowd its siblings out of a polyglot report.
