@@ -24,3 +24,12 @@ it("prints the OMP license with the CLI and native addon notices on the exact to
 	const sections = [license, ...notices].map(text => text.trimEnd());
 	expect(stdout).toBe(`OMP License and Third-Party Notices\n\n${sections.join("\n\n")}\n`);
 });
+
+it("names the installed axe-core version in the bundled MPL source notice", async () => {
+	const manifest = await Bun.file(path.join(repoRoot, "packages/coding-agent/package.json")).json();
+	const notice = await Bun.file(path.join(repoRoot, "packages/coding-agent/THIRD-PARTY-NOTICES.txt")).text();
+	const installed = manifest.dependencies["axe-core"] as string;
+	expect(installed).toMatch(/^\d+\.\d+\.\d+$/);
+	expect(notice).toContain(`- axe-core ${installed} — MPL-2.0`);
+	expect(notice).toContain(`https://registry.npmjs.org/axe-core/-/axe-core-${installed}.tgz`);
+});
