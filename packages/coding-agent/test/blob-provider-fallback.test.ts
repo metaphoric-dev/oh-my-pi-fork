@@ -152,7 +152,7 @@ describe("provider-file stream fallback", () => {
 			contextWindow: 1_000_000,
 			maxTokens: 4096,
 		});
-		const screenshot = "A".repeat(534_000);
+		const screenshot = "A".repeat(2_670_000);
 		const context: Context = {
 			messages: Array.from({ length: 62 }, (_, index) => ({
 				role: "toolResult",
