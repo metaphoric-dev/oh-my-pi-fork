@@ -375,6 +375,23 @@ fn rewrite_skip_overlaps_keeps_the_outer_match() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn write_refuses_matches_holding_skipped_comments() {
+	let (mem, fs) = MemFs::with_files(&[
+		("mem://root/c.js", "foo(/* keep this */ value);\n"),
+		("mem://root/d.js", "foo(value);\n"),
+	]);
+	let rules = rules(&[("foo($ARG)", "foo($ARG)")]);
+	let found = candidates(&fs, Path::new("mem://root"), None, None).await;
+	let edited = rewrite(&fs, found, &rewrite_spec(&rules, None, Mode::Write))
+		.await
+		.expect("comment-guarded write runs");
+	assert_eq!(edited.files.len(), 1);
+	assert_eq!(edited.files[0].display, "d.js");
+	assert_eq!(mem.contents("mem://root/c.js").as_deref(), Some("foo(/* keep this */ value);\n"));
+	assert_eq!(mem.contents("mem://root/d.js").as_deref(), Some("foo(value);\n"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn find_streams_files_with_single_and_multi_captures() {
 	let tree = temp_tree(&[
 		("a.ts", "const a = foo(1, 2);\n"),

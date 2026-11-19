@@ -813,6 +813,7 @@ pub async fn rewrite(
 			rules,
 			budget: rewrite.max_replacements,
 			skip_overlaps: rewrite.skip_overlaps,
+			mode: rewrite.mode,
 			halt: halt.clone(),
 		});
 		let (workers, window) = pool();
@@ -895,9 +896,9 @@ struct RewriteJob {
 	rules:         Arc<[CompiledRule]>,
 	budget:        usize,
 	skip_overlaps: bool,
+	mode:          Mode,
 	halt:          HaltFlag,
 }
-
 /// A file's rewrite task outcome, in the order [`rewrite`] replays it.
 struct Rewritten {
 	candidate: Candidate,
@@ -966,6 +967,7 @@ impl RewriteJob {
 			&runnable,
 			self.budget,
 			self.skip_overlaps,
+			self.mode,
 			Some(candidate.display.as_str()),
 			&self.halt,
 		)?;
@@ -1046,8 +1048,15 @@ pub fn rewrite_source(
 		.iter()
 		.map(|(template, pattern)| (*template, pattern))
 		.collect();
-	let staged =
-		stage(&ast, &runnable, rewrite.max_replacements, rewrite.skip_overlaps, None, cancel)?;
+	let staged = stage(
+		&ast,
+		&runnable,
+		rewrite.max_replacements,
+		rewrite.skip_overlaps,
+		Mode::Render,
+		None,
+		cancel,
+	)?;
 	let content = render(source, &staged.edits)?;
 	Ok(SourceEdit { changes: staged.changes, content, warnings })
 }
@@ -1288,6 +1297,7 @@ fn stage(
 	rules: &[(&str, &Pattern)],
 	budget: usize,
 	skip_overlaps: bool,
+	mode: Mode,
 	display: Option<&str>,
 	halt: &impl Cancelled,
 ) -> Result<Staged, Error> {
@@ -1300,6 +1310,9 @@ fn stage(
 	'rules: for &(template, pattern) in rules {
 		for matched in ast.root().find_all(pattern.clone()) {
 			check(halt)?;
+			if mode == Mode::Write && matched.get_node().dfs().any(|node| node.is_extra()) {
+				continue;
+			}
 			let edit = matched.replace_by(template);
 			if !seen.insert((edit.position, edit.deleted_length, edit.inserted_text.clone())) {
 				continue;
