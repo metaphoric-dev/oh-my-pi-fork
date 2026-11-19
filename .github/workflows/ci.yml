@@ -269,15 +269,23 @@ jobs:
    #
    # PRs never build. They restore the pair main built for the same native
    # sources from actions/cache (key = hash of every native build input:
-   # toolchain and build settings plus crates/** and BUILD.bazel). With no
-   # exact entry (the PR changes native inputs, or main has not built this
-   # state yet) they take main's newest entry, and with no entry at all the
-   # latest npm release. The workspace loader skips its version sentinel for
-   # workspace loads, so any of these load under a newer checkout. Testing
-   # against main's build instead of the last release keeps merged-but-
-   # unreleased native fixes from failing every PR that did not touch Rust
-   # (a merged grep fix plus its TS test failed 75 PR runs against the
-   # 18.3.1 addon). Only main saves; see the save step for why.
+   # toolchain and build settings plus crates/** and BUILD.bazel): an exact
+   # hit means the same inputs, so the same build. With no exact entry the
+   # job fetches the prebuilt pair at the version the source tree declares
+   # (packages/natives/package.json), never the registry's latest, and fails
+   # closed when that prebuilt's major version differs from the manifest's:
+   # a newer major may drop builtins, reword messages, or change NAPI
+   # signatures the TS tests pin, and testing the shards against it fails
+   # them for reasons no PR change can fix. A stale main build (a prefix
+   # fallback) is no better: its bytes predate the PR's native sources, so
+   # there is no prefix fallback. The workspace loader skips its version
+   # sentinel for workspace loads, and the install re-stamps the manifest
+   # version onto any stamped prebuilt, so neither loading nor the stamp can
+   # surface the skew; the version check below is the only guard. Testing
+   # against main's exact build instead of the last release keeps
+   # merged-but-unreleased native fixes from failing every PR that did not
+   # touch Rust (a merged grep fix plus its TS test failed 75 PR runs
+   # against the 18.3.1 addon). Only main saves; see the save step for why.
    #
    # Main (vmon, node Bazel cache) builds only the pair here so the TS
    # fan-out starts as soon as it links; native_addons_cross builds every
@@ -303,11 +311,12 @@ jobs:
               echo "prefix=natives-linux-x64-v1-" >> "$GITHUB_OUTPUT"
               echo "key=natives-linux-x64-v1-$NATIVE_INPUTS_HASH" >> "$GITHUB_OUTPUT"
 
-         # ---- PR path: main-built addons from actions/cache, else npm ----
+         # ---- PR path: main-built addons from actions/cache, else the manifest version ----
          # `ci-natives` is a plain workspace-relative path on purpose: the
          # cache version hashes the literal path list, so vmon (save) and
          # hosted (restore) must spell it identically, and upload-artifact
-         # skips dot-directories by default.
+         # skips dot-directories by default. Exact key only: a prefix hit is
+         # a stale build for other native sources, not this commit's addons.
          - name: Restore main-built native addons
            id: natives-cache
            if: github.event_name == 'pull_request'
@@ -315,19 +324,37 @@ jobs:
            with:
               path: ci-natives
               key: ${{ steps.natives-key.outputs.key }}
-              restore-keys: |
-                 ${{ steps.natives-key.outputs.prefix }}
-         - name: Fetch release native addons (npm)
-           if: github.event_name == 'pull_request' && steps.natives-cache.outputs.cache-matched-key == ''
+         - name: Fetch manifest-version native addons (npm)
+           if: github.event_name == 'pull_request' && steps.natives-cache.outputs.cache-hit != 'true'
            shell: bash
            run: |
               set -euo pipefail
-              tarball="$(npm view @oh-my-pi/pi-natives-linux-x64@latest dist.tarball)"
+              manifest_version="$(node -p 'require("./packages/natives/package.json").version')"
+              echo "No main-built addon entry for this native source state; fetching the manifest version ${manifest_version} (never latest)."
+              tarball="$(npm view "@oh-my-pi/pi-natives-linux-x64@${manifest_version}" dist.tarball)"
               echo "Fetching $tarball"
-              curl -fsSL --retry 3 "$tarball" | tar -xz -C "$RUNNER_TEMP"
+              rm -rf "$RUNNER_TEMP/npm-natives" && mkdir -p "$RUNNER_TEMP/npm-natives"
+              curl -fsSL --retry 3 "$tarball" | tar -xz -C "$RUNNER_TEMP/npm-natives"
               mkdir -p ci-natives/natives-linux-x64-baseline ci-natives/natives-linux-x64-modern
-              cp "$RUNNER_TEMP/package/pi_natives.linux-x64-baseline.node" ci-natives/natives-linux-x64-baseline/
-              cp "$RUNNER_TEMP/package/pi_natives.linux-x64-modern.node" ci-natives/natives-linux-x64-modern/
+              cp "$RUNNER_TEMP/npm-natives/package/pi_natives.linux-x64-baseline.node" ci-natives/natives-linux-x64-baseline/
+              cp "$RUNNER_TEMP/npm-natives/package/pi_natives.linux-x64-modern.node" ci-natives/natives-linux-x64-modern/
+         # The install re-stamps a stamped prebuilt to the manifest version
+         # and workspace loads skip validation, so a wrong-major prebuilt
+         # would still load (and pass the smoke probe) while failing the
+         # shards for reasons no PR change can fix. Fail closed here instead,
+         # before the artifact is uploaded.
+         - name: Reject major-skewed native addons
+           if: github.event_name == 'pull_request' && steps.natives-cache.outputs.cache-hit != 'true'
+           shell: bash
+           run: |
+              set -euo pipefail
+              manifest_version="$(node -p 'require("./packages/natives/package.json").version')"
+              tarball_version="$(node -e 'console.log(require(process.argv[1]).version)' "$RUNNER_TEMP/npm-natives/package/package.json")"
+              if [ "${tarball_version%%.*}" != "${manifest_version%%.*}" ]; then
+                echo "::error::Native addon major skew: the manifest declares ${manifest_version} but the prebuilt is ${tarball_version}; testing the shards against it would fail them for reasons no PR change can fix. Publish the manifest-version prebuilt or land a main build for these native sources."
+                exit 1
+              fi
+              echo "Native addons match the manifest major: ${tarball_version} for manifest ${manifest_version}."
          # Make the addon source visible whenever it is not source-matched,
          # instead of leaving a reviewer to wonder which addons the tests ran.
          - name: Report native addon source
@@ -335,14 +362,11 @@ jobs:
            shell: bash
            env:
               EXACT: ${{ steps.natives-cache.outputs.cache-hit }}
-              MATCHED: ${{ steps.natives-cache.outputs.cache-matched-key }}
            run: |
               if [ "$EXACT" = true ]; then
-                echo "Using main's addons for this exact native source state ($MATCHED)."
-              elif [ -n "$MATCHED" ]; then
-                echo "::notice title=Native addons not source-matched::No main build matches this PR's native sources; testing against main's newest addon build ($MATCHED). Native changes are validated post-merge on main and at release."
+                echo "Using main's addons for this exact native source state."
               else
-                echo "::notice title=Native addons from npm::No main-built addon cache entry is available; testing against the latest npm release addons."
+                echo "No main-built addon entry for this native source state; testing against the manifest-version prebuilt (the previous step fails closed on a major skew)."
               fi
 
          # ---- main path: bazel build of the linux-x64 pair ----
