@@ -385,7 +385,7 @@ image = { version = "0.25", default-features = false, features = [
    "gif",
    "webp",
 ] }
-resvg = "0.48"
+resvg = "0.50"
 # Not used directly: activates zune-jpeg's non-default `log` feature so image's
 # JPEG decoder compiles — zune-jpeg 0.5.15's no-log stub macros are not
 # expression-safe and the crate fails to build without it.
@@ -416,7 +416,7 @@ html-to-markdown-rs = { version = "3.18.3", default-features = false }
 # ──────────────────────────────────────────────────────────────────────────────
 # Tokenization
 # ──────────────────────────────────────────────────────────────────────────────
-xutf = "1.5"
+xutf = "2"
 zstd = "0.14"
 # The version brush-core builds on; bump with it.
 fancy-regex = "0.17"
@@ -453,10 +453,10 @@ jj-lib = { version = "0.44", default-features = false, features = ["git"] }
 # ──────────────────────────────────────────────────────────────────────────────
 # AST & Tree-Sitter
 # ──────────────────────────────────────────────────────────────────────────────
-ast-grep-core = { version = "0.39", default-features = false, features = [
+ast-grep-core = { version = "0.51", default-features = false, features = [
    "tree-sitter",
 ] }
-tree-sitter = "0.25"
+tree-sitter = "0.27"
 tree-sitter-bash = "0.25"
 tree-sitter-c = "0.24"
 tree-sitter-cpp = "0.23"

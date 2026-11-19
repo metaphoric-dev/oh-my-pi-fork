@@ -705,18 +705,17 @@ fn apply_hangul_compat_jamo_delta(width: usize, c: char) -> usize {
 	if !is_hangul_compat_jamo(c) {
 		return width;
 	}
+	// U+3164 HANGUL FILLER is an invisible placeholder: zero cells except
+	// under the narrow correction. Detect it by codepoint, not by a zero
+	// Unicode width: UAX #11 assigns it Wide (2 cells, as xutf reports since
+	// 2.3.0), while terminals render the placeholder as zero-width.
+	if c == '\u{3164}' && hangul_compat_jamo_target_width() != Some(1) {
+		return width.saturating_sub(xutf::width_char(c));
+	}
 	let Some(target) = hangul_compat_jamo_target_width() else {
 		return width;
 	};
 	let unicode_width = xutf::width_char(c);
-	// The zero-width filler (U+3164 HANGUL FILLER) is an invisible placeholder.
-	// The target is set for *visible* jamo, so only the narrow correction
-	// (target 1) applies to the filler; a wide terminal renders it at its
-	// Unicode width (0), not the wide target. Never widen a
-	// zero-width jamo past the narrow correction.
-	if unicode_width == 0 && target > 1 {
-		return width;
-	}
 	if unicode_width > target {
 		width.saturating_sub(unicode_width - target)
 	} else {
@@ -726,21 +725,15 @@ fn apply_hangul_compat_jamo_delta(width: usize, c: char) -> usize {
 
 #[inline]
 fn char_width_corrected(c: char) -> usize {
-	// Hangul Compatibility Jamo U+3131..=U+318E render as 1 cell on some
-	// terminals (Terminal.app, iTerm2) but follow UAX#11 at 2 cells on others
-	// (Ghostty, most Linux terminals). The width is resolved at runtime from the
-	// terminal identity and applied through the override; absent an override we
-	// fall back to the compile-time platform default.
+	// U+3164 HANGUL FILLER is an invisible placeholder: zero cells except
+	// under the narrow correction. Detect it by codepoint (see
+	// apply_hangul_compat_jamo_delta): UAX #11 assigns it Wide.
+	if c == '\u{3164}' {
+		return usize::from(hangul_compat_jamo_target_width() == Some(1));
+	}
 	if is_hangul_compat_jamo(c)
 		&& let Some(target) = hangul_compat_jamo_target_width()
 	{
-		// Zero-width filler (U+3164): only the narrow correction applies — a
-		// wide terminal renders it at its Unicode width (0), not the effective
-		// wide target set for visible jamo. See apply_hangul_compat_jamo_delta.
-		let unicode_width = xutf::width_char(c);
-		if unicode_width == 0 && target > 1 {
-			return unicode_width;
-		}
 		return target;
 	}
 	xutf::width_char(c)
