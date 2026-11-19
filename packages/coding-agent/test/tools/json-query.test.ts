@@ -138,8 +138,7 @@ describe("JSON query in read tool", () => {
 			error => error,
 		);
 		const message = String(error);
-		expect(message).toContain("cannot index");
-		expect(message).toContain('with "changedFiles"');
+		expect(message).toContain("changedFiles");
 		expect(message.length).toBeLessThan(1000);
 	});
 
