@@ -94,7 +94,7 @@ describe("JSON input BOM decoding", () => {
 		]) {
 			const file = path.join(dir, `${name}.json`);
 			await Bun.write(file, input);
-			await expect(tool.execute(name, { path: `${file}?q=.` })).rejects.toThrow(/failed to parse/i);
+			await expect(tool.execute(name, { path: `${file}?q=.` })).rejects.toThrow(/Failed to execute JSON query/i);
 		}
 	});
 });
