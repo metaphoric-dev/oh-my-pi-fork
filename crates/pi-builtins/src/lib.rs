@@ -129,6 +129,8 @@ mod stdio;
 	feature = "util.uniq"
 ))]
 mod locale;
+#[cfg(any(feature = "util.fold", feature = "util.wc"))]
+mod width;
 /// GNU `QUOTING_STYLE` names, shared by the utilities that honor them.
 #[cfg(any(feature = "util.du", feature = "util.env"))]
 mod quoting_style;

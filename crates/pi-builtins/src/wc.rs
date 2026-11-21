@@ -1144,7 +1144,7 @@ fn process_chunk<
 					*current_len += 8;
 				},
 				_ => {
-					*current_len += xutf::width_char(ch);
+					*current_len += crate::width::scalar_width(ch);
 				},
 			}
 		}
@@ -1628,6 +1628,14 @@ mod tests {
 		let (code, capture) = run_util::<Wc>(&[], "one two\n", "/");
 		assert_eq!(code, 0);
 		assert_eq!(capture.out(), "      1       2       8\n");
+		assert_eq!(capture.err(), "");
+	}
+
+	#[test]
+	fn longest_line_counts_decomposed_hangul_as_two_columns() {
+		let (code, capture) = run_util::<Wc>(&["-L"], "\u{1100}\u{1161}\n", "/");
+		assert_eq!(code, 0);
+		assert_eq!(capture.out(), "2\n");
 		assert_eq!(capture.err(), "");
 	}
 

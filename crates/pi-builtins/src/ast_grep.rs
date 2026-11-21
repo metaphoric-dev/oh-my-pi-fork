@@ -808,7 +808,12 @@ impl AstGrep {
 			};
 			let changes = match &rewrite {
 				Some(rewrite) => match search::rewrite_source(&file.source, file.language, rewrite, &stop) {
-					Ok(edit) => Some(edit.changes),
+					Ok(edit) => {
+						for warning in &edit.warnings {
+							let _ = writeln!(host.stderr, "WARNING: {warning}");
+						}
+						Some(edit.changes)
+					},
 					Err(error) => return Err(parse_pattern_error(host, error.to_string())),
 				},
 				None => None,
@@ -837,7 +842,12 @@ impl AstGrep {
 		let vfs = host.vfs();
 		let rules = [(self.pattern.clone(), self.rewrite.clone().unwrap_or_default())];
 		match search::rewrite(&vfs, candidates, &self.rewrite_spec(&rules, Mode::Write)).await {
-			Ok(edited) => Ok(edited.files.iter().map(|file| file.changes.len()).sum()),
+			Ok(edited) => {
+				for warning in &edited.report.warnings {
+					let _ = writeln!(host.stderr, "WARNING: {warning}");
+				}
+				Ok(edited.files.iter().map(|file| file.changes.len()).sum())
+			},
 			Err(SearchError::Stopped) => Err(1),
 			Err(error) => Err(parse_pattern_error(host, error.to_string())),
 		}
@@ -876,7 +886,12 @@ impl AstGrep {
 			Some(template) => {
 				let rules = [(self.pattern.clone(), template.clone())];
 				match search::rewrite_source(&source, lang, &self.rewrite_spec(&rules, Mode::Render), &stop) {
-					Ok(edit) => Some(edit),
+					Ok(edit) => {
+						for warning in &edit.warnings {
+							let _ = writeln!(host.stderr, "WARNING: {warning}");
+						}
+						Some(edit)
+					},
 					Err(SearchError::Stopped) => return Err(1),
 					Err(error) => return Err(parse_pattern_error(host, error.to_string())),
 				}
@@ -1097,6 +1112,40 @@ mod tests {
 		assert_eq!(std::fs::read_to_string(tree.path().join("a.rs")).unwrap(), A_RS.replace("foo(1)", "bar(1)"));
 		assert_eq!(std::fs::read_to_string(tree.path().join("b.rs")).unwrap(), B_RS.replace("foo(3)", "bar(3)"));
 	}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_skips_unreproducible_comment_and_warns() {
+	let tree = tempfile::tempdir().unwrap();
+	std::fs::write(tree.path().join("c.js"), "foo(/* keep this */ value);\n").unwrap();
+	let (code, out, err) =
+		run(&tree, &["run", "-p", "foo($ARG)", "-r", "foo($ARG)", "-U", "c.js"]).await;
+	assert_eq!(
+		(code, out.as_str(), err.as_str()),
+		(
+			1,
+			"",
+			"WARNING: c.js: foo($ARG): skipped 1 match holding comments the replacement cannot \
+			 reproduce\n"
+		)
+	);
+	assert_eq!(
+		std::fs::read_to_string(tree.path().join("c.js")).unwrap(),
+		"foo(/* keep this */ value);\n"
+	);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn preview_warns_on_unreproducible_comment_without_changing_output() {
+	let tree = tempfile::tempdir().unwrap();
+	std::fs::write(tree.path().join("c.js"), "foo(/* keep this */ value);\n").unwrap();
+	let (code, out, err) = run(&tree, &["run", "-p", "foo($ARG)", "-r", "foo($ARG)", "c.js"]).await;
+	assert_eq!(code, 0, "{err}");
+	assert!(!out.contains("foo(value)"), "no rewrite is shown: {out}");
+	assert!(
+		err.contains("WARNING: foo($ARG): skipped 1 match holding comments"),
+		"the skip is explained: {err}"
+	);
+}
 
 	#[tokio::test(flavor = "multi_thread")]
 	async fn json_pretty_prints_match_array() {

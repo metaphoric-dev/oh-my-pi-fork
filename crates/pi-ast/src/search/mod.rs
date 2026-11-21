@@ -897,7 +897,6 @@ struct RewriteJob {
 	skip_overlaps: bool,
 	halt:          HaltFlag,
 }
-
 /// A file's rewrite task outcome, in the order [`rewrite`] replays it.
 struct Rewritten {
 	candidate: Candidate,
@@ -941,7 +940,9 @@ impl RewriteJob {
 		for rule in self.rules.iter() {
 			check(&self.halt)?;
 			match rule.by_lang.get(key) {
-				Some(Ok(pattern)) => runnable.push((rule.template.as_str(), pattern)),
+				Some(Ok(pattern)) => {
+					runnable.push((rule.template.as_str(), rule.pattern.as_str(), pattern))
+				},
 				Some(Err(error)) => {
 					warnings.push(format!("{}: {}: {error}", rule.pattern, candidate.display));
 				},
@@ -967,6 +968,7 @@ impl RewriteJob {
 			self.budget,
 			self.skip_overlaps,
 			Some(candidate.display.as_str()),
+			warnings,
 			&self.halt,
 		)?;
 		Ok(Step::Staged { language, source, staged })
@@ -1017,7 +1019,7 @@ pub fn rewrite_source(
 		match ops::compile_pattern(pattern, rewrite.selector, &rewrite.strictness, language) {
 			Ok(compiled) => {
 				warnings.extend(error_node_warning(pattern, &compiled, language));
-				rules.push((template.as_str(), compiled));
+				rules.push((template.as_str(), pattern.as_str(), compiled));
 			},
 			Err(err) if rewrite.fail_on_parse_error => {
 				return Err(Error::Invalid(format!("{pattern}: {err}")));
@@ -1044,10 +1046,17 @@ pub fn rewrite_source(
 	}
 	let runnable: Vec<_> = rules
 		.iter()
-		.map(|(template, pattern)| (*template, pattern))
+		.map(|(template, pattern_text, pattern)| (*template, *pattern_text, pattern))
 		.collect();
-	let staged =
-		stage(&ast, &runnable, rewrite.max_replacements, rewrite.skip_overlaps, None, cancel)?;
+	let staged = stage(
+		&ast,
+		&runnable,
+		rewrite.max_replacements,
+		rewrite.skip_overlaps,
+		None,
+		&mut warnings,
+		cancel,
+	)?;
 	let content = render(source, &staged.edits)?;
 	Ok(SourceEdit { changes: staged.changes, content, warnings })
 }
@@ -1280,15 +1289,116 @@ struct Staged {
 	limit_reached: bool,
 }
 
+/// Meta-variables a rewrite template carries over, as `(multiple, name)`.
+/// Mirrors `ast_grep_core::replacer::split_first_meta_var` for plain
+/// templates: this crate never passes transforms, so a `$` run of one or two
+/// binds a single node, a run of three binds a multi, and anything longer or
+/// with a bad name is literal text, exactly as upstream parses it.
+fn template_vars(template: &str) -> Vec<(bool, &str)> {
+	let mut vars = Vec::new();
+	let mut len = 0;
+	let mut offset = 0;
+	while let Some(found) = template[len + offset..].find('$') {
+		let start = len + offset + found;
+		match split_template_var(&template[start..]) {
+			Some((multiple, skipped, name)) => {
+				vars.push((multiple, name));
+				len = start + skipped;
+				offset = 0;
+			},
+			None => offset += found + 1,
+		}
+	}
+	vars
+}
+
+/// One `$` run of a template: `(multiple, bytes skipped, name)`.
+fn split_template_var(src: &str) -> Option<(bool, usize, &str)> {
+	debug_assert!(src.starts_with('$'));
+	let mut count = 0;
+	let mut skipped = 0;
+	let multiple = loop {
+		count += 1;
+		skipped += 1;
+		if count == 3 {
+			break true;
+		}
+		if !src[skipped..].starts_with('$') {
+			break false;
+		}
+	};
+	let rest = &src[skipped..];
+	let end = rest
+		.find(|c: char| !is_template_var_char(c))
+		.unwrap_or(rest.len());
+	if end == 0 || !rest.starts_with(is_template_var_first_char) {
+		return None;
+	}
+	Some((multiple, skipped + end, &rest[..end]))
+}
+
+/// First character of a template meta-variable name (`$A`, never `$5`).
+fn is_template_var_first_char(c: char) -> bool {
+	matches!(c, 'A'..='Z' | '_')
+}
+
+/// Characters of a template meta-variable name.
+fn is_template_var_char(c: char) -> bool {
+	is_template_var_first_char(c) || c.is_ascii_digit()
+}
+
+/// Source spans a rewrite template carries over into the replacement: the
+/// ranges the template's meta-variables bind in this match. A multi `$$$B`
+/// expands to its first node's start through its last node's end (upstream
+/// copies that whole slice, comments included); a single `$F` expands to its
+/// node's range.
+fn carried_spans(
+	template: &str,
+	matched: &NodeMatch<'_, StrDoc<SupportLang>>,
+) -> Vec<std::ops::Range<usize>> {
+	let env = matched.get_env();
+	let mut spans = Vec::new();
+	for (multiple, name) in template_vars(template) {
+		if multiple {
+			let nodes = env.get_multiple_matches(name);
+			if let (Some(first), Some(last)) = (nodes.first(), nodes.last()) {
+				spans.push(first.range().start..last.range().end);
+			}
+		} else if let Some(node) = env.get_match(name) {
+			spans.push(node.range());
+		}
+	}
+	spans
+}
+
+/// Whether `matched` holds skipped syntax (usually a comment) the replacement
+/// would drop: an extra outside every span the template carries over.
+/// Refusing the match keeps Smart matching from silently deleting source the
+/// template cannot reproduce.
+fn drops_extra(template: &str, matched: &NodeMatch<'_, StrDoc<SupportLang>>) -> bool {
+	let carried = carried_spans(template, matched);
+	matched.get_node().dfs().any(|node| {
+		node.is_extra() && {
+			let range = node.range();
+			!carried
+				.iter()
+				.any(|span| span.start <= range.start && range.end <= span.end)
+		}
+	})
+}
+
 /// Stages every `(template, pattern)` replacement in `ast`, at most `budget`
 /// of them. Byte-identical edits (several rules rewriting one node the same
-/// way) are staged once.
+/// way) are staged once. The comment guard runs in every mode, so a preview
+/// stages exactly what a write would stage; refused matches are reported in
+/// `warnings`, never silently dropped.
 fn stage(
 	ast: &Ast,
-	rules: &[(&str, &Pattern)],
+	rules: &[(&str, &str, &Pattern)],
 	budget: usize,
 	skip_overlaps: bool,
 	display: Option<&str>,
+	warnings: &mut Vec<String>,
 	halt: &impl Cancelled,
 ) -> Result<Staged, Error> {
 	let mut staged =
@@ -1297,9 +1407,14 @@ fn stage(
 	// Kept spans by start; disjoint, so only the nearest earlier start can
 	// overlap a new span.
 	let mut kept = BTreeMap::new();
-	'rules: for &(template, pattern) in rules {
+	'rules: for &(template, pattern_text, pattern) in rules {
+		let mut skipped = 0;
 		for matched in ast.root().find_all(pattern.clone()) {
 			check(halt)?;
+			if drops_extra(template, &matched) {
+				skipped += 1;
+				continue;
+			}
 			let edit = matched.replace_by(template);
 			if !seen.insert((edit.position, edit.deleted_length, edit.inserted_text.clone())) {
 				continue;
@@ -1331,6 +1446,16 @@ fn stage(
 				deleted_length: edit.deleted_length,
 			});
 			staged.edits.push(edit);
+		}
+		if skipped > 0 {
+			let matches = if skipped == 1 { "match" } else { "matches" };
+			let issue = format!(
+				"skipped {skipped} {matches} holding comments the replacement cannot reproduce"
+			);
+			warnings.push(match display {
+				Some(display) => format!("{display}: {pattern_text}: {issue}"),
+				None => format!("{pattern_text}: {issue}"),
+			});
 		}
 	}
 	Ok(staged)

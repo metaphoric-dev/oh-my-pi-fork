@@ -220,7 +220,7 @@ fn char_width(ch: Option<char>) -> usize {
 		None => 1,
 		Some('\0') => 0,
 		Some(c) if c.is_control() => 1,
-		Some(c) => xutf::width_char(c),
+		Some(c) => crate::width::scalar_width(c),
 	}
 }
 
@@ -502,6 +502,14 @@ mod tests {
 		// No-break space is not a break point; ideographic space is.
 		assert_eq!(ok("a\u{a0}b c\n".as_bytes(), &["-s", "-w", "3"], "en_US.UTF-8"), "a\u{a0}b\n c\n".as_bytes());
 		assert_eq!(ok("a\u{3000}bcd\n".as_bytes(), &["-s", "-w", "3"], "en_US.UTF-8"), "a\u{3000}\nbcd\n".as_bytes());
+	}
+
+	#[test]
+	fn decomposed_hangul_jamo_take_no_extra_column() {
+		assert_eq!(
+			ok("가\n".as_bytes(), &["-w", "2"], "en_US.UTF-8"),
+			"가\n".as_bytes()
+		);
 	}
 
 	#[test]

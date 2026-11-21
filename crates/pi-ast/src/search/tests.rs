@@ -375,6 +375,104 @@ fn rewrite_skip_overlaps_keeps_the_outer_match() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn write_refuses_matches_holding_skipped_comments() {
+	let (mem, fs) = MemFs::with_files(&[
+		("mem://root/c.js", "foo(/* keep this */ value);\n"),
+		("mem://root/d.js", "foo(value);\n"),
+	]);
+	let rules = rules(&[("foo($ARG)", "foo($ARG)")]);
+	let found = candidates(&fs, Path::new("mem://root"), None, None).await;
+	let edited = rewrite(&fs, found, &rewrite_spec(&rules, None, Mode::Write))
+		.await
+		.expect("comment-guarded write runs");
+	assert_eq!(edited.files.len(), 1);
+	assert_eq!(edited.files[0].display, "d.js");
+	assert_eq!(mem.contents("mem://root/c.js").as_deref(), Some("foo(/* keep this */ value);\n"));
+	assert_eq!(mem.contents("mem://root/d.js").as_deref(), Some("foo(value);\n"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn preview_and_write_agree_on_unreproducible_comments() {
+	let rules = rules(&[("foo($ARG)", "foo($ARG)")]);
+	for mode in [Mode::Preview, Mode::Write] {
+		let (mem, fs) = MemFs::with_files(&[("mem://root/c.js", "foo(/* keep this */ value);\n")]);
+		let found = candidates(&fs, Path::new("mem://root"), None, None).await;
+		let edited = rewrite(&fs, found, &rewrite_spec(&rules, None, mode))
+			.await
+			.expect("comment-guarded rewrite runs");
+		assert!(edited.files.is_empty(), "{mode:?} must stage no file");
+		assert_eq!(
+			edited.report.warnings.len(),
+			1,
+			"{mode:?} must warn: {:?}",
+			edited.report.warnings
+		);
+		assert!(
+			edited.report.warnings[0].contains("c.js: foo($ARG): skipped 1 match"),
+			"{mode:?} warning names the file, rule and count: {:?}",
+			edited.report.warnings
+		);
+		assert!(
+			edited.report.warnings[0].contains("cannot reproduce"),
+			"{mode:?} warning says why: {:?}",
+			edited.report.warnings
+		);
+		assert_eq!(
+			mem.contents("mem://root/c.js").as_deref(),
+			Some("foo(/* keep this */ value);\n"),
+			"{mode:?} must not touch the file"
+		);
+	}
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rewrite_keeps_comment_carried_by_multi_capture() {
+	let source = "function f() { // note\n return 1 }\n";
+	let rules = rules(&[("function $F() { $$$B }", "async function $F() { $$$B }")]);
+	for mode in [Mode::Preview, Mode::Write] {
+		let (mem, fs) = MemFs::with_files(&[("mem://root/a.js", source)]);
+		let found = candidates(&fs, Path::new("mem://root"), None, None).await;
+		let edited = rewrite(&fs, found, &rewrite_spec(&rules, None, mode))
+			.await
+			.expect("carried-comment rewrite runs");
+		assert_eq!(edited.files.len(), 1, "{mode:?} must stage the carried comment");
+		assert_eq!(edited.files[0].changes.len(), 1);
+		assert!(
+			edited.files[0].changes[0].after.contains("// note"),
+			"{mode:?} replacement keeps the comment: {:?}",
+			edited.files[0].changes[0].after
+		);
+		assert!(
+			edited.report.warnings.is_empty(),
+			"{mode:?} warns nothing: {:?}",
+			edited.report.warnings
+		);
+		let expected = if mode == Mode::Write {
+			"async function f() { // note\n return 1 }\n"
+		} else {
+			source
+		};
+		assert_eq!(mem.contents("mem://root/a.js").as_deref(), Some(expected));
+	}
+}
+
+#[test]
+fn rewrite_source_warns_on_unreproducible_comment() {
+	let rules = rules(&[("foo($ARG)", "foo($ARG)")]);
+	let spec = rewrite_spec(&rules, None, Mode::Render);
+	let cancel = CancellationToken::new();
+	let edit = rewrite_source("foo(/* keep */ value);\n", SupportLang::JavaScript, &spec, &cancel)
+		.expect("source rewrite runs");
+	assert!(edit.changes.is_empty());
+	assert_eq!(edit.warnings.len(), 1, "one skip warning: {:?}", edit.warnings);
+	assert!(
+		edit.warnings[0].starts_with("foo($ARG): skipped 1 match"),
+		"warning names the rule and count: {:?}",
+		edit.warnings
+	);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn find_streams_files_with_single_and_multi_captures() {
 	let tree = temp_tree(&[
 		("a.ts", "const a = foo(1, 2);\n"),
