@@ -419,12 +419,7 @@ describe("UsageDashboardComponent", () => {
 			const first = lines.findIndex(line => line.includes("Claude"));
 			const bar = lines.findIndex(line => /[█░]/.test(line));
 			expect(bar - first).toBeLessThanOrEqual(2);
-			expect(
-				lines
-					.slice(first, bar)
-					.join("")
-					.replace(/[│\s]/g, ""),
-			).toBe(label.replace(/\s/g, ""));
+			expect(lines.slice(first, bar).join("").replace(/[│\s]/g, "")).toBe(label.replace(/\s/g, ""));
 		} finally {
 			component.dispose();
 		}
