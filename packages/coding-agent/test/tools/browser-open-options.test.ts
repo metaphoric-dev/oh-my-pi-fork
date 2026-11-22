@@ -61,7 +61,7 @@ describe("browser open options CDP helpers", () => {
 			{ ignoreHttpsErrors: true, allowFileAccess: true },
 		);
 		expect(args).toContain("--hide-scrollbars");
-		expect(args).toContain("--enable-features=WebMCPTesting,DevToolsWebMCPSupport");
+		expect(args).toContain("--enable-features=WebMCP,WebMCPTesting,DevToolsWebMCPSupport");
 		expect(args).toContain("--ignore-certificate-errors");
 		expect(args).toContain("--allow-file-access-from-files");
 	});
