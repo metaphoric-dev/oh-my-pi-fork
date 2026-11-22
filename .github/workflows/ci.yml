@@ -189,9 +189,14 @@ jobs:
               # crates added since the template build download). Fetch first.
               cargo fetch --locked
               cargo deny --locked --offline check licenses sources
+         - name: Lint workspace
+           if: ${{ !cancelled() }}
+           run: bun run check:tools
          - name: Type check workspace
-           run: bun run ci:check:full
+           if: ${{ !cancelled() }}
+           run: bun run --filter './packages/*' --sequential --if-present check:types
          - name: Build collab web
+           if: ${{ !cancelled() }}
            run: bun run collab:web:build
 
    # MODULE.bazel.lock caches the crate_universe (@crates) extension result,
@@ -252,18 +257,22 @@ jobs:
          # brush/uutils/jaq code) but is still held to zero rustc warnings;
          # Cargo honors that via `[lints]`, Bazel via the clippy-ported config.
          - name: Clippy (workspace lint policy on opted-in crates)
+           if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
            run: |
               bazelisk query "kind('rust_library|rust_shared_library', //crates/pi-ast/... + //crates/pi-diff/... + //crates/pi-edit/... + //crates/pi-iso/... + //crates/pi-natives/... + //crates/pi-shell/... + //crates/pi-vcs/... + //crates/pi-voice/... + //crates/pi-walker/...)" \
                 | xargs bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=clippy-strict --
          - name: Clippy (default lints elsewhere)
+           if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
            run: |
               bazelisk query "kind('rust_library|rust_shared_library', //crates/... - (//crates/pi-ast/... + //crates/pi-diff/... + //crates/pi-edit/... + //crates/pi-iso/... + //crates/pi-natives/... + //crates/pi-shell/... + //crates/pi-vcs/... + //crates/pi-voice/... + //crates/pi-walker/...) - //crates/pi-builtins/... - //crates/vendor/brush-core/...)" \
                 | xargs bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=clippy --
          - name: Clippy (manifest allows on ported pi-builtins)
+           if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
            run: |
               bazelisk query "kind('rust_library|rust_shared_library', //crates/pi-builtins/...)" \
                 | xargs bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=clippy-ported --
          - name: Rustfmt
+           if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
            run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=rustfmt //crates/...
 
    # Provides the linux-x64 addon pair every downstream TS job installs,
@@ -558,15 +567,17 @@ jobs:
          - uses: ./.github/actions/native-artifacts
            with:
               targets: linux-x64-baseline linux-x64-modern
-         - name: Test workspace packages and repo scripts (TS)
+         - name: Test workspace packages (TS)
+           if: ${{ !cancelled() }}
            env:
               OMP_TEST_CONCURRENCY: "4"
-           run: |
-              bun run ci:test:ts:workspace
-              # Not `test:scripts`: scripts/install.test.ts fails on main
-              # (its install.sh smoke-check executes a fake binary), so running
-              # the whole group here would red this job on an unrelated break.
-              bun test scripts/release.test.ts scripts/ci-build-upload.test.ts
+           run: bun run ci:test:ts:workspace
+         # Not `test:scripts`: scripts/install.test.ts fails on main
+         # (its install.sh smoke-check executes a fake binary), so running
+         # the whole group here would red this job on an unrelated break.
+         - name: Test repo scripts (TS)
+           if: ${{ !cancelled() }}
+           run: bun test scripts/release.test.ts scripts/ci-build-upload.test.ts
 
    test_coding_agent_singleton:
       name: Test coding-agent singleton/global-state (TS)
@@ -652,8 +663,18 @@ jobs:
          - uses: ./.github/actions/native-artifacts
            with:
               targets: linux-x64-baseline linux-x64-modern
-         - name: CLI smoke test
-           run: bun run ci:test:smoke
+         - name: CLI --version
+           if: ${{ !cancelled() }}
+           run: bun packages/coding-agent/src/cli.ts --version
+         - name: CLI --help
+           if: ${{ !cancelled() }}
+           run: bun packages/coding-agent/src/cli.ts --help
+         - name: CLI stats --help
+           if: ${{ !cancelled() }}
+           run: bun packages/coding-agent/src/cli.ts stats --help
+         - name: CLI --smoke-test
+           if: ${{ !cancelled() }}
+           run: bun packages/coding-agent/src/cli.ts --smoke-test
 
    install_methods:
       name: Install method smoke tests
