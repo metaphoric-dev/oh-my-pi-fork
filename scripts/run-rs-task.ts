@@ -68,6 +68,7 @@ const TASK_COMMANDS = {
 			"run",
 			"--workspace",
 			...VENDORED_FORK_EXCLUDES,
+			"--no-fail-fast",
 			"--status-level=fail",
 			"--final-status-level=fail",
 		],
@@ -99,12 +100,14 @@ if (taskName !== "fmt:rs" && !(isCI() || (await hasRustAffectingChanges()))) {
 	process.exit(0);
 }
 
+let status = 0;
 for (const command of TASK_COMMANDS[taskName]) {
 	const exitCode = await runCommand(command);
-	if (exitCode !== 0) {
-		process.exit(exitCode);
+	if (exitCode !== 0 && status === 0) {
+		status = exitCode;
 	}
 }
+process.exit(status);
 
 function isRustTaskName(value: string | undefined): value is RustTaskName {
 	return value != null && value in TASK_COMMANDS;

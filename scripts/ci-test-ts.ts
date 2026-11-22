@@ -1026,7 +1026,16 @@ const testCommands = applyChunkBudget(requestedCommands, poolWidth);
 if (pooled && !isDryRun) {
 	await runTestCommandsInParallel(testCommands, poolWidth);
 } else {
+	let status = 0;
 	for (const testCommand of testCommands) {
-		await runTestCommand(testCommand);
+		try {
+			await runTestCommand(testCommand);
+		} catch (error) {
+			status = 1;
+			console.error(error instanceof Error ? error.message : String(error));
+		}
+	}
+	if (status !== 0) {
+		process.exitCode = status;
 	}
 }
