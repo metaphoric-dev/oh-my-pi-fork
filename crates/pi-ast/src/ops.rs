@@ -260,6 +260,7 @@ mod tests {
 			"(defun greet (name)\n  (message \"Hello %s\" name))\n",
 			SupportLang::EmacsLisp,
 			&rewrite,
+			None,
 			&CancellationToken::new(),
 		)
 		.expect("rewrite succeeds");

@@ -4,7 +4,7 @@
 //! no file headings unless `--heading always`.
 
 use std::{
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	ffi::OsString,
 	fmt::Write as _,
 	io::{self, Write},
@@ -795,6 +795,10 @@ impl AstGrep {
 		};
 		let rules = self.rewrite.as_ref().map(|template| [(self.pattern.clone(), template.clone())]);
 		let rewrite = rules.as_ref().map(|rules| self.rewrite_spec(rules, Mode::Preview));
+		// Pattern-level warnings carry no file name and repeat once per file,
+		// while file-level warnings name their file; printing each distinct
+		// line once keeps the former while attributing the latter.
+		let mut seen_warnings = HashSet::new();
 		let mut any = false;
 		let mut finder = search::find(&vfs, candidates, &query);
 		while let Some(file) = finder.next().await {
@@ -807,10 +811,18 @@ impl AstGrep {
 				},
 			};
 			let changes = match &rewrite {
-				Some(rewrite) => match search::rewrite_source(&file.source, file.language, rewrite, &stop) {
+				Some(rewrite) => match search::rewrite_source(
+					&file.source,
+					file.language,
+					rewrite,
+					Some(file.display.as_str()),
+					&stop,
+				) {
 					Ok(edit) => {
 						for warning in &edit.warnings {
-							let _ = writeln!(host.stderr, "WARNING: {warning}");
+							if seen_warnings.insert(warning.clone()) {
+								let _ = writeln!(host.stderr, "WARNING: {warning}");
+							}
 						}
 						Some(edit.changes)
 					},
@@ -885,7 +897,7 @@ impl AstGrep {
 		let edit = match self.rewrite.as_ref() {
 			Some(template) => {
 				let rules = [(self.pattern.clone(), template.clone())];
-				match search::rewrite_source(&source, lang, &self.rewrite_spec(&rules, Mode::Render), &stop) {
+				match search::rewrite_source(&source, lang, &self.rewrite_spec(&rules, Mode::Render), None, &stop) {
 					Ok(edit) => {
 						for warning in &edit.warnings {
 							let _ = writeln!(host.stderr, "WARNING: {warning}");
@@ -1142,8 +1154,39 @@ async fn preview_warns_on_unreproducible_comment_without_changing_output() {
 	assert_eq!(code, 0, "{err}");
 	assert!(!out.contains("foo(value)"), "no rewrite is shown: {out}");
 	assert!(
-		err.contains("WARNING: foo($ARG): skipped 1 match holding comments"),
-		"the skip is explained: {err}"
+		err.contains("WARNING: c.js: foo($ARG): skipped 1 match holding comments"),
+		"the skip names the file: {err}"
+	);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn preview_attributes_skip_warnings_per_file() {
+	let tree = tempfile::tempdir().unwrap();
+	std::fs::write(tree.path().join("c.js"), "foo(/* keep this */ value);\n").unwrap();
+	std::fs::write(tree.path().join("d.js"), "foo(/* keep that */ value);\n").unwrap();
+	let (code, _out, err) = run(&tree, &["run", "-p", "foo($ARG)", "-r", "foo($ARG)", "c.js", "d.js"]).await;
+	assert_eq!(code, 0, "{err}");
+	assert!(
+		err.contains("WARNING: c.js: foo($ARG): skipped 1 match holding comments"),
+		"c.js names its file: {err}"
+	);
+	assert!(
+		err.contains("WARNING: d.js: foo($ARG): skipped 1 match holding comments"),
+		"d.js names its file: {err}"
+	);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn preview_prints_repeated_warnings_once() {
+	let tree = tempfile::tempdir().unwrap();
+	std::fs::write(tree.path().join("c.js"), "foo(/* keep this */ value);\n").unwrap();
+	let (code, _out, err) =
+		run(&tree, &["run", "-p", "foo($ARG)", "-r", "foo($ARG)", "c.js", "c.js"]).await;
+	assert_eq!(code, 0, "{err}");
+	assert_eq!(
+		err.lines().filter(|line| line.contains("skipped 1 match")).count(),
+		1,
+		"identical warnings print once: {err:?}"
 	);
 }
 
