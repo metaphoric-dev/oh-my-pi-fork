@@ -16,6 +16,7 @@ use std::{
 };
 
 use omp_core::{FastHashMap, Str, Ulid, encoding::base64};
+use omp_http::globally_routable;
 use parking_lot::Mutex;
 #[cfg(target_os = "linux")]
 use tempfile::TempDir;
@@ -345,41 +346,6 @@ fn domain_matches(rule: &str, host: &str) -> bool {
 
 fn authorized_address(ip: IpAddr, allow_localhost: bool) -> bool {
 	globally_routable(ip) || allow_localhost && ip.is_loopback()
-}
-
-fn globally_routable(ip: IpAddr) -> bool {
-	match ip {
-		IpAddr::V4(value) => {
-			!(value.is_private()
-				|| value.is_loopback()
-				|| value.is_link_local()
-				|| value.is_multicast()
-				|| value.is_unspecified()
-				|| value.is_broadcast()
-				|| value.octets()[0] == 0
-				|| matches!(
-					value.octets(),
-					[100, 64..=127, _, _]
-						| [192, 0, 0, _]
-						| [192, 0, 2, _]
-						| [198, 18..=19, _, _]
-						| [198, 51, 100, _]
-						| [203, 0, 113, _]
-						| [240..=255, _, _, _]
-						| [168, 63, 129, 16]
-				))
-		},
-		IpAddr::V6(value) => {
-			if let Some(mapped) = value.to_ipv4_mapped() {
-				return globally_routable(IpAddr::V4(mapped));
-			}
-			!(value.is_loopback()
-				|| value.is_multicast()
-				|| value.is_unspecified()
-				|| value.is_unique_local()
-				|| value.is_unicast_link_local())
-		},
-	}
 }
 
 fn connect(policy: &ProxyPolicy, token: &Str, host: &str, port: u16) -> io::Result<TcpStream> {
