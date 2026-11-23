@@ -6,6 +6,10 @@
 
 - Added `FileLock.isHeld(path)`, which reports whether a lock is held without acquiring it ([#17428](https://github.com/can1357/oh-my-pi/pull/17428) by [@andrebrait](https://github.com/andrebrait))
 
+### Fixed
+
+- Fixed `ast-grep` preview warnings to name the affected file and to print each distinct warning once ([#5](https://github.com/metaphoric-dev/oh-my-pi-fork/pull/5)).
+
 ## [18.14.0] - 2026-10-29
 
 ### Breaking Changes
