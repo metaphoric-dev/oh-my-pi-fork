@@ -126,9 +126,11 @@ pub fn literal_address(url: &Url) -> Option<IpAddr> {
 /// The `max_redirects` cap replaces `redirect::Policy::limited`; a custom
 /// policy has to enforce the cap itself. Idle connections are not retained:
 /// a reused connection would skip resolution and the guard with it, so every
-/// hop opens a fresh, resolved connection.
+/// hop opens a fresh, resolved connection. Environment proxies are ignored:
+/// a proxy resolves the target itself, so honoring one would skip the checks.
 pub fn guarded_client_builder(max_redirects: usize) -> ClientBuilder {
 	client_builder()
+		.no_proxy()
 		.dns_resolver(AddressGuardResolver)
 		.redirect(address_guard_policy(max_redirects))
 		.pool_max_idle_per_host(0)
