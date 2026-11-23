@@ -961,7 +961,9 @@ jobs:
          needs.release_smoke.result == 'success' &&
          !inputs.skip_npm }}
       needs: [release_metadata, release_gate, release_binary, release_smoke]
-      runs-on: depot-ubuntu-22.04
+      # GitHub-hosted: npm trusted publishing (OIDC) is only supported there,
+      # not on third-party runners.
+      runs-on: ubuntu-22.04
       # id-token lets npm mint the OIDC token for trusted publishing; the
       # NODE_AUTH_TOKEN below is the fallback for unconfigured packages.
       permissions:
@@ -1153,7 +1155,9 @@ jobs:
       # binary updates install what build.stencil.so published (update-cli.ts),
       # and HTML exports load its pinned viewer, so the build service must lead npm.
       needs: [release_metadata, release_binary, release_smoke, release_build, release_native_leaves]
-      runs-on: depot-ubuntu-22.04
+      # GitHub-hosted: npm trusted publishing (OIDC) is only supported there,
+      # not on third-party runners.
+      runs-on: ubuntu-22.04
       # `id-token: write` lets npm mint the GitHub OIDC token it exchanges for a
       # short-lived publish token (trusted publishing + provenance). When a
       # package has no matching trusted publisher configured, npm silently falls
