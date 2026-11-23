@@ -998,8 +998,11 @@ pub struct SourceEdit {
 /// Rewrites `source` as `language`.
 ///
 /// [`Rewrite::lang`], [`Rewrite::max_files`], and [`Rewrite::mode`] are
-/// ignored. A source with syntax errors is left unchanged with a warning (or
-/// fails under [`Rewrite::fail_on_parse_error`]).
+/// ignored. `display` names the source in file-level warnings (skipped
+/// matches, syntax errors); pattern-level warnings carry no name, so a caller
+/// looping over files can print each distinct warning once. A source with
+/// syntax errors is left unchanged with a warning (or fails under
+/// [`Rewrite::fail_on_parse_error`]).
 ///
 /// # Errors
 /// [`Error::Invalid`] when the grammar cannot load, for a parse failure under
@@ -1009,6 +1012,7 @@ pub fn rewrite_source(
 	source: &str,
 	language: SupportLang,
 	rewrite: &Rewrite<'_>,
+	display: Option<&str>,
 	cancel: &CancellationToken,
 ) -> Result<SourceEdit, Error> {
 	load_grammar(language)?;
@@ -1041,7 +1045,10 @@ pub fn rewrite_source(
 		if rewrite.fail_on_parse_error {
 			return Err(Error::Invalid(issue));
 		}
-		warnings.push(issue);
+		warnings.push(match display {
+			Some(display) => format!("{display}: {issue}"),
+			None => issue,
+		});
 		return Ok(unchanged(warnings));
 	}
 	let runnable: Vec<_> = rules
@@ -1053,7 +1060,7 @@ pub fn rewrite_source(
 		&runnable,
 		rewrite.max_replacements,
 		rewrite.skip_overlaps,
-		None,
+		display,
 		&mut warnings,
 		cancel,
 	)?;

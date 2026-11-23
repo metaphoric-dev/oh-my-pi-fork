@@ -368,7 +368,7 @@ fn rewrite_skip_overlaps_keeps_the_outer_match() {
 	let rules = rules(&[("foo($X)", "bar($X)")]);
 	let spec = Rewrite { skip_overlaps: true, ..rewrite_spec(&rules, None, Mode::Render) };
 	let cancel = CancellationToken::new();
-	let edit = rewrite_source("foo(foo(1));\n", SupportLang::TypeScript, &spec, &cancel)
+	let edit = rewrite_source("foo(foo(1));\n", SupportLang::TypeScript, &spec, None, &cancel)
 		.expect("overlaps are skipped");
 	assert_eq!(edit.changes.len(), 1);
 	assert_eq!(edit.content, "bar(foo(1));\n");
@@ -461,13 +461,62 @@ fn rewrite_source_warns_on_unreproducible_comment() {
 	let rules = rules(&[("foo($ARG)", "foo($ARG)")]);
 	let spec = rewrite_spec(&rules, None, Mode::Render);
 	let cancel = CancellationToken::new();
-	let edit = rewrite_source("foo(/* keep */ value);\n", SupportLang::JavaScript, &spec, &cancel)
-		.expect("source rewrite runs");
+	let edit =
+		rewrite_source("foo(/* keep */ value);\n", SupportLang::JavaScript, &spec, None, &cancel)
+			.expect("source rewrite runs");
 	assert!(edit.changes.is_empty());
 	assert_eq!(edit.warnings.len(), 1, "one skip warning: {:?}", edit.warnings);
 	assert!(
 		edit.warnings[0].starts_with("foo($ARG): skipped 1 match"),
 		"warning names the rule and count: {:?}",
+		edit.warnings
+	);
+}
+
+#[test]
+fn rewrite_source_prefixes_file_warnings_with_display() {
+	let rules = rules(&[("foo($ARG)", "foo($ARG)")]);
+	let spec = rewrite_spec(&rules, None, Mode::Render);
+	let cancel = CancellationToken::new();
+	let edit = rewrite_source(
+		"foo(/* keep */ value);\n",
+		SupportLang::JavaScript,
+		&spec,
+		Some("c.js"),
+		&cancel,
+	)
+	.expect("source rewrite runs");
+	assert!(edit.changes.is_empty());
+	assert_eq!(edit.warnings.len(), 1, "one skip warning: {:?}", edit.warnings);
+	assert!(
+		edit.warnings[0].starts_with("c.js: foo($ARG): skipped 1 match"),
+		"warning names the file, rule and count: {:?}",
+		edit.warnings
+	);
+}
+
+#[test]
+fn rewrite_source_leaves_pattern_warnings_without_display() {
+	let rules = rules(&[("123+", "ignored")]);
+	let spec = rewrite_spec(&rules, None, Mode::Preview);
+	let cancel = CancellationToken::new();
+	let edit =
+		rewrite_source("const x = 1;\n", SupportLang::JavaScript, &spec, Some("a.js"), &cancel)
+			.expect("source rewrite runs");
+	assert!(
+		edit
+			.warnings
+			.iter()
+			.any(|warning| warning.contains("ERROR node")),
+		"pattern still warns: {:?}",
+		edit.warnings
+	);
+	assert!(
+		edit
+			.warnings
+			.iter()
+			.all(|warning| !warning.starts_with("a.js:")),
+		"pattern warnings carry no file name: {:?}",
 		edit.warnings
 	);
 }
