@@ -226,6 +226,7 @@ export class AstGrepTool implements AgentTool<typeof astGrepSchema, AstGrepToolD
 			const scope = await resolveToolSearchScope({
 				rawPaths,
 				cwd: this.session.cwd,
+				agentDir: this.session.settings.getAgentDir(),
 				internalUrlAction: "search",
 				filesystem: urlFilesystem,
 				resolveExternalUrl: async rawPath => {

@@ -85,6 +85,7 @@ import {
 import { executeReadUrl, fetchReadUrl, parseReadUrlTarget } from "./fetch";
 import { approvalDirectoryKey } from "./approval-cache";
 import { approvalTargetKey, approvalTargetNamesFile, isApprovalPublicUrl } from "./approval-targets";
+import { assertNotCredentialStore } from "./credential-store-guard";
 import {
 	postProcessToolResult,
 	resolveArtifactSpillThreshold,
@@ -1948,6 +1949,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				markRawSuffixResolution(archivePath.suffixResolution, isRawSelector(parseSel(literalSplit.sel)));
 			}
 			if (archivePath) {
+				await assertNotCredentialStore(archivePath.absolutePath, this.session.settings.getAgentDir());
 				if (question !== undefined) throw new ToolError(IMAGE_QUESTION_SELECTOR_ERROR);
 				const archiveSubPath = located
 					? { path: archivePath.archiveSubPath, sel: located.sel }
@@ -1965,6 +1967,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 			const sqlitePath = await resolveSqliteReadPath(this.session, readPath, suffixCache, signal);
 			if (sqlitePath) {
+				await assertNotCredentialStore(sqlitePath.absolutePath, this.session.settings.getAgentDir());
 				return readSqlite(sqlitePath, signal);
 			}
 			// local:// and artifact:// locate backing files without their URL query;
@@ -1980,6 +1983,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					? null
 					: await resolveJsonReadPath(this.session, jsonReadPath, suffixCache, signal);
 			if (jsonPath) {
+				await assertNotCredentialStore(jsonPath.absolutePath, this.session.settings.getAgentDir());
 				if (jsonPath.suffixResolution) {
 					markRawSuffixResolution(jsonPath.suffixResolution, isRawSelector(parseSel(literalSplit.sel)));
 				}
@@ -2097,6 +2101,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				throw error;
 			}
 		}
+		await assertNotCredentialStore(absolutePath, this.session.settings.getAgentDir());
 		if (specialKind) {
 			throw new ToolError(
 				`Cannot read '${localReadPath}': it is a ${specialKind}, not a regular file or directory.`,

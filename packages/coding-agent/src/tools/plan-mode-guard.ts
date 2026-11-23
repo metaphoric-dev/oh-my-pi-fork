@@ -10,6 +10,7 @@ import { isEnoent } from "@oh-my-pi/pi-utils";
 import { InternalUrlRouter } from "../internal-urls";
 import { sessionResolveContext } from "../internal-urls/context";
 import type { ToolSession } from ".";
+import { assertNotCredentialStore } from "./credential-store-guard";
 import { resolveToCwd } from "./path-utils";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 
@@ -110,14 +111,16 @@ export async function targetsLocalSandbox(
  * unwrapped first so the inner filesystem path drives resolution — keeping the
  * plan-mode guard and the eventual write in lockstep. Locating uses the session's
  * read context (same `local://` mapping), and `signal` aborts a vault root lookup.
+ * A target that reaches omp's credential store is refused.
  */
 export async function resolvePlanPath(session: ToolSession, targetPath: string, signal?: AbortSignal): Promise<string> {
 	const router = InternalUrlRouter.instance();
 	const normalized = router.normalize(unwrapHashlineHeaderPath(targetPath));
-	if (router.canHandle(normalized)) {
-		return router.requireLocal(normalized, "write", sessionResolveContext(session, { signal }), { create: true });
-	}
-	return resolveToCwd(normalized, session.cwd);
+	const resolved = router.canHandle(normalized)
+		? await router.requireLocal(normalized, "write", sessionResolveContext(session, { signal }), { create: true })
+		: resolveToCwd(normalized, session.cwd);
+	await assertNotCredentialStore(resolved, session.settings.getAgentDir());
+	return resolved;
 }
 
 /**

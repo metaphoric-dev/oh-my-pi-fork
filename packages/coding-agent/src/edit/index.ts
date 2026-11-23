@@ -35,6 +35,7 @@ import type { ToolSession } from "../tools";
 import { routeWriteThroughBridge } from "../tools/acp-bridge";
 import { approvalTargetKey } from "../tools/approval-targets";
 import { strictestApproval, truncateForPrompt } from "../tools/approval";
+import { assertNotCredentialStore } from "../tools/credential-store-guard";
 import {
 	deleteFileWithFallback,
 	hasFileWriteFallback,
@@ -543,6 +544,10 @@ export class EditTool implements AgentTool<TInput> {
 		const batch = getLspBatchRequest(context?.toolCall);
 		let outcome;
 		try {
+			// Refused before the native session reads any target; `#write` re-checks the final paths.
+			for (const key of this.approvalCacheTargets(params) ?? []) {
+				if (path.isAbsolute(key)) await assertNotCredentialStore(key, this.session.settings.getAgentDir());
+			}
 			outcome = await editSession.apply(
 				{ lspBatchId: batch?.id, lspFlush: batch?.flush ?? false },
 				(_error, request) => this.#write(request, signal),
@@ -692,6 +697,7 @@ export class EditTool implements AgentTool<TInput> {
 				return { error: `${url} ${reason}`, planWritable: false };
 			}
 			const located = await router.locate(target, context, { create: true });
+			if (located) await assertNotCredentialStore(located, this.session.settings.getAgentDir());
 			return { path: located ?? undefined, planWritable: spec.write?.scope === "sandbox" };
 		} catch (error) {
 			return { error: error instanceof Error ? error.message : String(error), planWritable: false };
@@ -699,6 +705,9 @@ export class EditTool implements AgentTool<TInput> {
 	}
 
 	async #write(request: EditWriteRequest, signal?: AbortSignal): Promise<EditWriteResponse> {
+		const agentDir = this.session.settings.getAgentDir();
+		await assertNotCredentialStore(request.path, agentDir);
+		if (request.moveTo) await assertNotCredentialStore(request.moveTo, agentDir);
 		if (request.op === "delete") {
 			await deleteFileWithFallback(request.path, Bun.file(request.path));
 			if (this.session.enableLsp ?? true) {

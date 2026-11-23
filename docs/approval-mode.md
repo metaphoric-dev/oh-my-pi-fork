@@ -63,6 +63,14 @@ tools:
 - Without an interactive UI (print mode, headless subagents, the Cursor exec bridge) the call is refused, like any other prompt with nobody to answer it.
 - The `/settings` panel edits the list as JSON under Interaction → Approvals. It is hidden when project config supplies the list, so a project value is never promoted to global config.
 
+## Credential store
+
+`read`, `write`, `edit`, `grep`, `ast_grep`, `ast_edit`, and `find` refuse omp's credential store, `agent.db` in the agent directory, and its SQLite `-wal`, `-shm`, and `-journal` files. No mode, grant, or `tools.approval` policy lifts the refusal.
+
+- The tools compare the file a call would open: symlinks are followed (a dangling one too, since a write creates its target), and a hard link to the store is refused by its inode.
+- A search root that is the store is refused. A directory search that walks past it is not refused; `grep` and `find` skip the file as binary.
+- `bash`, `eval`, and other tools that run code act as your OS user, so they can still read the file. Keeping a prompt-injected command away from the credentials needs an OS sandbox that hides the agent directory.
+
 ## User overrides
 
 `tools.approval` is honored in every mode:

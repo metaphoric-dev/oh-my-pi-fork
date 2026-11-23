@@ -733,6 +733,7 @@ export class GrepTool implements AgentTool<typeof searchSchema, GrepToolDetails>
 				const scope = await resolveToolSearchScope({
 					rawPaths: resolvedPaths,
 					cwd: this.session.cwd,
+					agentDir: this.session.settings.getAgentDir(),
 					internalUrlAction: "search",
 					filesystem: urlFilesystem,
 					resolveExternalUrl: materializeExternalUrlForSearch,

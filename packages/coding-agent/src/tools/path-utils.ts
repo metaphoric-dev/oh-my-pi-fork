@@ -19,6 +19,7 @@ import {
 } from "@oh-my-pi/pi-utils";
 import { InternalUrlRouter } from "../internal-urls";
 import { type InternalUrlFilesystem, joinUrlPath, UrlFsError } from "../internal-urls/url-filesystem";
+import { assertNotCredentialStore } from "./credential-store-guard";
 import { ToolAbortError } from "./tool-errors";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 
@@ -1422,6 +1423,8 @@ export interface ToolScopeOptions {
 	multipathStatHint?: string;
 	/** Materialize readable external URLs to local text files before scope derivation. */
 	resolveExternalUrl?: (rawPath: string) => Promise<ResolvedExternalSearchUrl | undefined>;
+	/** The session's agent directory: a root reaching its credential store (or the process default) is refused. */
+	agentDir?: string;
 }
 
 export interface ToolScopeResolution {
@@ -1456,7 +1459,8 @@ export function searchPathTier(args: unknown): ToolTier {
  *  2. materialize external URLs; internal URLs stay URLs for the native search's filesystem,
  *  3. partition existing vs missing when multiple paths are supplied,
  *  4. derive a single search base path / glob, or a multi-target list,
- *  5. stat the resolved base path through `filesystem` so callers can branch on directory vs file scope.
+ *  5. refuse a host root that reaches omp's credential store,
+ *  6. stat the resolved base path through `filesystem` so callers can branch on directory vs file scope.
  */
 export async function resolveToolSearchScope(opts: ToolScopeOptions): Promise<ToolScopeResolution> {
 	const { rawPaths: inputs, cwd, internalUrlAction } = opts;
@@ -1562,6 +1566,10 @@ export async function resolveToolSearchScope(opts: ToolScopeOptions): Promise<To
 			globFilter = multiTargets ? undefined : multiSearchPath.glob;
 		}
 		scopePath = multiSearchPath.scopePath;
+	}
+
+	for (const root of [searchPath, ...(multiTargets ?? []).map(target => target.basePath), ...(exactFilePaths ?? [])]) {
+		if (!internalRouter.canHandle(root)) await assertNotCredentialStore(path.resolve(cwd, root), opts.agentDir);
 	}
 
 	let isDirectory: boolean;

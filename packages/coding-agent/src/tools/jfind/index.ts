@@ -16,6 +16,7 @@ import { hasNativeJudge, journalJudgmentUsage, resolveJudge, sharedJudgmentCache
 import findDescription from "../../prompts/tools/find.md" with { type: "text" };
 import type { ToolSession } from "..";
 import { resolveToolTier } from "../approval";
+import { assertNotCredentialStore } from "../credential-store-guard";
 import {
 	formatPathRelativeToCwd,
 	normalizePathLikeInput,
@@ -91,6 +92,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 			tier: resolveToolTier(this, params),
 		});
 		const root = await resolveSearchRoot(filesystem, rawScopeInput, cwd);
+		if (root.type === "file") await assertNotCredentialStore(root.path, this.session.settings.getAgentDir());
 		const scopePath =
 			root.path === path.resolve(cwd)
 				? undefined
