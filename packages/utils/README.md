@@ -19,7 +19,7 @@ Shared utilities for [omp](https://github.com/can1357/oh-my-pi) packages. Zero c
 | `abortable` / `async`                                                                                              | AbortSignal-aware stream/promise helpers                                                     |
 | `math-delimiters`                                                                                                  | LaTeX span/block delimiter grammar (offsets only) shared by the TUI and collab-web renderers |
 | `peek-file`                                                                                                        | Read the first N bytes of a file with pooled buffers                                         |
-| `frontmatter`, `glob`, `mime`, `temp`, `format`, `color`, `snowflake`, `tab-spacing`, `path-tree`, `sanitize-text` | Smaller single-purpose helpers                                                               |
+| `frontmatter`, `mime`, `temp`, `format`, `color`, `snowflake`, `tab-spacing`, `path-tree`, `sanitize-text`         | Smaller single-purpose helpers                                                               |
 
 Import from the root barrel or per-module subpaths (`@oh-my-pi/pi-utils/<module>`).
 
