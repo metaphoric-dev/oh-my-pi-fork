@@ -88,6 +88,18 @@ function servePage(body: string): Bun.Server<undefined> {
 	});
 }
 
+// What the page itself can see of omp: an omp global, a wrapped platform method, a polyfilled context.
+const PAGE_VIEW = `JSON.stringify({
+  ompGlobals: Object.getOwnPropertyNames(globalThis).filter(name => name.startsWith("__ompWebMcp")),
+  nativeRegisterTool: typeof ModelContext === "undefined"
+    ? null
+    : /\\[native code\\]/.test(Function.prototype.toString.call(ModelContext.prototype.registerTool)),
+  ownModelContext: Object.getOwnPropertyNames(navigator).concat(Object.getOwnPropertyNames(document)).includes("modelContext"),
+  modelContext: "modelContext" in navigator || "modelContext" in document,
+})`;
+// No secure context, so no platform API, and omp adds none.
+const INSECURE_VIEW = { ompGlobals: [], nativeRegisterTool: null, ownModelContext: false, modelContext: false };
+
 describe.skipIf(!CHROMIUM_AVAILABLE)("browser WebMCP helpers", () => {
 	it.skipIf(!WEBMCP_PAGE_AVAILABLE)(
 		"discovers, invokes, bounds trust, and reports native registrations",
@@ -187,34 +199,39 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser WebMCP helpers", () => {
 		async () => {
 			const invoke = createBrowserHost();
 			using server = servePage(`<title>untouched</title>`);
-			// What the page itself can see of omp: an omp global, a wrapped platform method, a polyfilled context.
-			const pageView = `JSON.stringify({
-  ompGlobals: Object.getOwnPropertyNames(globalThis).filter(name => name.startsWith("__ompWebMcp")),
-  nativeRegisterTool: typeof ModelContext === "undefined"
-    ? null
-    : /\\[native code\\]/.test(Function.prototype.toString.call(ModelContext.prototype.registerTool)),
-  ownModelContext: Object.getOwnPropertyNames(navigator).concat(Object.getOwnPropertyNames(document)).includes("modelContext"),
-  modelContext: "modelContext" in navigator || "modelContext" in document,
-})`;
 			await invoke({ action: "open", name: "webmcp-untouched", url: `http://localhost:${server.port}/` });
 			const secure = { ompGlobals: [], nativeRegisterTool: true, ownModelContext: false, modelContext: true };
-			expect(JSON.parse(valueFrom<string>(await invoke(call("webmcp-untouched", "evaluate", [pageView]))))).toEqual(
+			expect(JSON.parse(valueFrom<string>(await invoke(call("webmcp-untouched", "evaluate", [PAGE_VIEW]))))).toEqual(
 				secure,
 			);
 			await invoke(call("webmcp-untouched", "webmcpList"));
-			expect(JSON.parse(valueFrom<string>(await invoke(call("webmcp-untouched", "evaluate", [pageView]))))).toEqual(
+			expect(JSON.parse(valueFrom<string>(await invoke(call("webmcp-untouched", "evaluate", [PAGE_VIEW]))))).toEqual(
 				secure,
 			);
 
-			// No secure context, so no platform API, and omp adds none.
 			await invoke(call("webmcp-untouched", "goto", ["data:text/html,<title>insecure</title>"]));
-			expect(JSON.parse(valueFrom<string>(await invoke(call("webmcp-untouched", "evaluate", [pageView]))))).toEqual({
-				ompGlobals: [],
-				nativeRegisterTool: null,
-				ownModelContext: false,
-				modelContext: false,
-			});
+			expect(JSON.parse(valueFrom<string>(await invoke(call("webmcp-untouched", "evaluate", [PAGE_VIEW]))))).toEqual(
+				INSECURE_VIEW,
+			);
 			await invoke({ action: "close", name: "webmcp-untouched", kill: true });
+		},
+		BROWSER_TEST_TIMEOUT_MS,
+	);
+
+	// Needs Chromium only: an insecure page has no WebMCP whether or not Chrome enables the page API.
+	it(
+		"leaves an insecure page's globals alone, before and after a webmcp helper runs and across a navigation",
+		async () => {
+			const invoke = createBrowserHost();
+			const view = async () =>
+				JSON.parse(valueFrom<string>(await invoke(call("webmcp-insecure", "evaluate", [PAGE_VIEW]))));
+			await invoke({ action: "open", name: "webmcp-insecure", url: "data:text/html,<title>insecure</title>" });
+			expect(await view()).toEqual(INSECURE_VIEW);
+			await invoke(call("webmcp-insecure", "webmcpList"));
+			expect(await view()).toEqual(INSECURE_VIEW);
+			await invoke(call("webmcp-insecure", "goto", ["data:text/html,<title>next</title>"]));
+			expect(await view()).toEqual(INSECURE_VIEW);
+			await invoke({ action: "close", name: "webmcp-insecure", kill: true });
 		},
 		BROWSER_TEST_TIMEOUT_MS,
 	);
