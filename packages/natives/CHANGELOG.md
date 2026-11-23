@@ -6,6 +6,10 @@
 
 - Added `FileLock.isHeld(path)`, which reports whether a lock is held without acquiring it ([#17428](https://github.com/can1357/oh-my-pi/pull/17428) by [@andrebrait](https://github.com/andrebrait))
 
+### Fixed
+
+- `htmlToMarkdown` with `cleanContent` again rejects HTML nested past 64 levels instead of converting it silently; html-to-markdown-rs 3.22 raised the default traversal limit to 1024.
+
 ## [18.14.0] - 2026-10-29
 
 ### Breaking Changes
