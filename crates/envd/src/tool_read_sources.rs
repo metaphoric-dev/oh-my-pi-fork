@@ -151,10 +151,21 @@ impl SystemHttpClient {
 			.map_err(|error| WebError::InvalidUrl(error.to_string().into()))?;
 		validate_http_url(&authored_url)?;
 		authored_url.set_fragment(None);
-		let origin = omp_http::literal_address(&authored_url).map(omp_http::address_class);
-		time::timeout(HTTP_TIMEOUT, self.request_with_retries(origin, authored_url, request))
-			.await
-			.map_err(|_| WebError::request("request timed out after 30s"))?
+		// Seed every send of this request with the authored host's class: a retry
+		// re-resolves the name, and an unseeded retry would admit a public hostname
+		// that re-resolves private as an unrecorded first hop. Literals classify
+		// directly; names resolve once up front inside the request timeout, so a
+		// stalled resolver fails the request instead of shedding the seed. Only
+		// an unresolvable or mixed-class name falls back to unseeded.
+		time::timeout(HTTP_TIMEOUT, async {
+			let origin = match omp_http::literal_address(&authored_url).map(omp_http::address_class) {
+				Some(class) => Some(class),
+				None => omp_http::resolve_host_class(&authored_url).await,
+			};
+			self.request_with_retries(origin, authored_url, request).await
+		})
+		.await
+		.map_err(|_| WebError::request("request timed out after 30s"))?
 	}
 
 	async fn request_with_retries(

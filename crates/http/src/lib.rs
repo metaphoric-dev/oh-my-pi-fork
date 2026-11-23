@@ -15,8 +15,8 @@ use reqwest::{Client as ReqwestClient, ClientBuilder, redirect::Policy};
 mod guard;
 
 pub use guard::{
-	address_class, address_guard_scope, globally_routable, guarded_client_builder, literal_address,
-	AddressClass, AddressGuardError,
+	AddressClass, AddressGuardError, address_class, address_guard_scope, globally_routable,
+	guarded_client_builder, literal_address, resolve_host_class,
 };
 
 /// Cloneable handle to the workspace-owned HTTP connection pool.

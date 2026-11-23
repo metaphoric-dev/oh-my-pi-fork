@@ -121,6 +121,29 @@ pub fn literal_address(url: &Url) -> Option<IpAddr> {
 	}
 }
 
+/// Classifies the authored URL's host once, before any guarded send.
+///
+/// Literals classify directly; names resolve through the system resolver and
+/// need every address in one class. `None` means the class is unknown: a name
+/// that does not resolve, an empty host, or a mixed-class answer. Callers seed
+/// the guard scope with `None` then, exactly as for an unseeded request.
+pub async fn resolve_host_class(url: &Url) -> Option<AddressClass> {
+	if let Some(ip) = literal_address(url) {
+		return Some(address_class(ip));
+	}
+	let host = url.host_str().filter(|host| !host.is_empty())?.to_owned();
+	let port = url.port_or_known_default()?;
+	let addrs = spawn_blocking(move || {
+		(host.as_str(), port)
+			.to_socket_addrs()
+			.map(|addrs| addrs.collect::<Vec<_>>())
+	})
+	.await
+	.ok()?
+	.ok()?;
+	resolved_class(&addrs)
+}
+
 /// Starts a client builder whose resolution and redirect hops are guarded.
 ///
 /// The `max_redirects` cap replaces `redirect::Policy::limited`; a custom
@@ -180,8 +203,9 @@ fn resolution_refusal(previous: Option<AddressClass>, resolved: AddressClass) ->
 
 /// Runs `fut` inside one guarded request scope.
 ///
-/// `origin` is the class of the authored URL's IP literal host, or `None`
-/// when the host is a name and its class becomes known at resolution.
+/// `origin` is the authored host's class: literals classify directly, names
+/// resolve once before the first send. `None` means the class is unknown (an
+/// unresolvable or mixed-class name), and the first hop resolves unseeded.
 pub fn address_guard_scope<T: 'static>(
 	origin: Option<AddressClass>,
 	fut: impl Future<Output = T>,
@@ -363,6 +387,28 @@ mod tests {
 		assert_eq!(decide_resolved(Some(AddressClass::NonPublic), &link_local), None);
 		assert_eq!(decide_resolved(None, &link_local), None);
 		assert_eq!(decide_resolved(None, &[]), None);
+	}
+
+	#[tokio::test]
+	async fn host_class_resolves_literals_without_lookup() {
+		let loopback = Url::parse("http://127.0.0.1:8080/dev").expect("parse loopback URL");
+		assert_eq!(resolve_host_class(&loopback).await, Some(AddressClass::NonPublic));
+		let global = Url::parse("http://8.8.8.8/").expect("parse global URL");
+		assert_eq!(resolve_host_class(&global).await, Some(AddressClass::Global));
+		let refused = Url::parse("http://169.254.169.254/").expect("parse refused URL");
+		assert_eq!(resolve_host_class(&refused).await, Some(AddressClass::Refused));
+	}
+
+	#[tokio::test]
+	async fn host_class_seeds_names_from_system_resolution() {
+		let local = Url::parse("http://localhost:8080/dev").expect("parse localhost URL");
+		assert_eq!(resolve_host_class(&local).await, Some(AddressClass::NonPublic));
+	}
+
+	#[tokio::test]
+	async fn host_class_returns_none_without_a_class() {
+		let unknown = Url::parse("bogus://host/dev").expect("parse unknown-scheme URL");
+		assert_eq!(resolve_host_class(&unknown).await, None);
 	}
 
 	#[test]
