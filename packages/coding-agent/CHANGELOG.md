@@ -21,7 +21,7 @@
 - Fixed `omp install git:github.com/user/repo` treating `git` as the host instead of installing the GitHub plugin ([#17436](https://github.com/can1357/oh-my-pi/issues/17436)).
 - Fixed `read` showing a zip, tar, asar or ISO archive's old contents after a same-size rewrite within milliseconds of its previous write, on filesystems with coarse timestamps such as Linux ext4 ([#17389](https://github.com/can1357/oh-my-pi/pull/17389) by [@will-bogusz](https://github.com/will-bogusz))
 - Browser `fill` in Chrome replaces the text of rich-text editors such as Slate (Discord) and Lexical instead of leaving the old text in place or breaking the editor, and an empty fill clears them ([#17417](https://github.com/can1357/oh-my-pi/pull/17417) by [@will-bogusz](https://github.com/will-bogusz))
-- The browser tool's `webmcpList` and `webmcpInvoke` now find the tools a page registers in Chrome and Chromium 157 and later, instead of reporting that Chrome does not expose WebMCP to the page: Chromium 157 removed `WebMCPTesting`, which used to imply `WebMCP`, so headless Chromium now also launches with `--enable-features=WebMCP` ([#19232](https://github.com/can1357/oh-my-pi/pull/19232))
+- The browser tool's `webmcpList` and `webmcpInvoke` now find the tools a page registers in Chrome and Chromium 157 and later, instead of reporting that Chrome does not expose WebMCP to the page ([#19232](https://github.com/can1357/oh-my-pi/pull/19232))
 
 ## [18.14.0] - 2026-10-29
 
