@@ -117,6 +117,10 @@ run_source_install_smoke() {
 
 run_tarball_install_smoke() {
    section "Tarball install smoke"
+   # The build section runs in its own process whose EXIT trap restores the
+   # manifest, so re-align here: the leaf and core tarballs must carry the
+   # built addon's version, not the pre-alignment one.
+   align_native_manifest
    local tarball_dir="$WORK_DIR/tarballs"
    mkdir -p "$tarball_dir"
    local host_tag
