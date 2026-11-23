@@ -28,7 +28,7 @@ concurrency:
 jobs:
    warm_bun:
       name: Seed bun store cache
-      runs-on: ubuntu-22.04
+      runs-on: depot-ubuntu-22.04
       steps:
          - uses: actions/checkout@v4
          - uses: ./.github/actions/bun-install

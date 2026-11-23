@@ -110,7 +110,7 @@ jobs:
       # Hosted, not vmon: this ~20 s git-tag probe gates the whole release
       # chain and needs no toolchain, so it should not wait on a vmon sandbox
       # (team capacity, snapshot fork) on the release critical path.
-      runs-on: ubuntu-22.04
+      runs-on: depot-ubuntu-22.04
       outputs:
          is-release: ${{ steps.detect.outputs.is-release }}
          release-tag: ${{ steps.detect.outputs.release-tag }}
@@ -158,7 +158,7 @@ jobs:
 
    check:
       name: Lint, type check & web build
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'vmon-large/from=omp-ci' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'depot-ubuntu-22.04' || 'depot-ubuntu-24.04-8' }}
       steps:
          - uses: actions/checkout@v4
          - uses: ./.github/actions/bun-install
@@ -210,7 +210,7 @@ jobs:
    # without bazelisk can commit it as-is.
    bazel_lock:
       name: Check MODULE.bazel.lock freshness
-      runs-on: ubuntu-22.04
+      runs-on: depot-ubuntu-22.04
       steps:
          - uses: actions/checkout@v4
          - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -237,7 +237,7 @@ jobs:
    rust_validate:
       name: Validate Rust workspace (bazel)
       if: github.event_name != 'pull_request'
-      runs-on: vmon-large/from=omp-ci
+      runs-on: depot-ubuntu-24.04-8
       steps:
          - uses: actions/checkout@v4
          - uses: ./.github/actions/bun-install
@@ -298,7 +298,7 @@ jobs:
    # with required checks.
    native_addons:
       name: Build native addons (bazel)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'vmon-large/from=omp-ci' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'depot-ubuntu-22.04' || 'depot-ubuntu-24.04-8' }}
       # actions: write lets main prune superseded addon cache entries.
       permissions:
          contents: read
@@ -461,7 +461,7 @@ jobs:
    native_addons_cross:
       name: Build native addons (bazel, cross targets)
       if: github.event_name != 'pull_request'
-      runs-on: vmon-large/from=omp-ci
+      runs-on: depot-ubuntu-24.04-8
       steps:
          - uses: actions/checkout@v4
          - id: cache
@@ -526,7 +526,7 @@ jobs:
 
    test_coding_agent_native:
       name: "Test coding-agent native/unit (TS) ${{ matrix.shard }}"
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'vmon-large/from=omp-ci' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'depot-ubuntu-22.04' || 'depot-ubuntu-24.04-8' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
@@ -557,7 +557,7 @@ jobs:
 
    test_workspace:
       name: Test TS workspace fast
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'vmon-large/from=omp-ci' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'depot-ubuntu-22.04' || 'depot-ubuntu-24.04-8' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 20
@@ -581,7 +581,7 @@ jobs:
 
    test_coding_agent_singleton:
       name: Test coding-agent singleton/global-state (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'vmon-large/from=omp-ci' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'depot-ubuntu-22.04' || 'depot-ubuntu-24.04-8' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 20
@@ -598,7 +598,7 @@ jobs:
 
    test_ts_native:
       name: Test TS native/integration packages
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'vmon-large/from=omp-ci' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'depot-ubuntu-22.04' || 'depot-ubuntu-24.04-8' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
@@ -617,7 +617,7 @@ jobs:
 
    test_coding_agent_ui:
       name: Test coding-agent UI/TUI (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'vmon-large/from=omp-ci' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'depot-ubuntu-22.04' || 'depot-ubuntu-24.04-8' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
@@ -634,7 +634,7 @@ jobs:
 
    test_coding_agent_runtime:
       name: Test coding-agent runtime/session (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'vmon-large/from=omp-ci' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'depot-ubuntu-22.04' || 'depot-ubuntu-24.04-8' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
@@ -653,7 +653,7 @@ jobs:
 
    test_smoke:
       name: Test CLI smoke (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'vmon-large/from=omp-ci' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'depot-ubuntu-22.04' || 'depot-ubuntu-24.04-8' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 15
@@ -678,7 +678,7 @@ jobs:
 
    install_methods:
       name: Install method smoke tests
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'vmon-large/from=omp-ci' }}
+      runs-on: ${{ github.event_name == 'pull_request' && 'depot-ubuntu-22.04' || 'depot-ubuntu-24.04-8' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       steps:
@@ -710,7 +710,7 @@ jobs:
          needs.test_smoke.result == 'success' && needs.check.result == 'success' &&
          needs.install_methods.result == 'success' }}
       needs: [release_metadata, check, rust_validate, native_addons, native_addons_cross, test_workspace, test_coding_agent_singleton, test_ts_native, test_coding_agent_ui, test_coding_agent_runtime, test_coding_agent_native, test_smoke, install_methods]
-      runs-on: ubuntu-22.04
+      runs-on: depot-ubuntu-22.04
       steps:
          - uses: actions/checkout@v4
          - uses: ./.github/actions/bun-install
@@ -790,7 +790,7 @@ jobs:
                     binary_path: packages/coding-agent/binaries/omp-windows-arm64.exe,
                     native_targets: win32-arm64,
                  }
-      runs-on: ubuntu-22.04
+      runs-on: depot-ubuntu-22.04
       permissions:
          contents: read
       steps:
@@ -869,12 +869,12 @@ jobs:
          fail-fast: false
          matrix:
             include:
-               - { os: ubuntu-22.04, target_id: linux-x64, binary: omp-linux-x64 }
-               - { os: ubuntu-24.04-arm, target_id: linux-arm64, binary: omp-linux-arm64 }
+               - { os: depot-ubuntu-22.04, target_id: linux-x64, binary: omp-linux-x64 }
+               - { os: depot-ubuntu-24.04-arm, target_id: linux-arm64, binary: omp-linux-arm64 }
                # musl binaries need the musl loader, which glibc runners lack:
                # they run in an Alpine container of the runner's arch.
-               - { os: ubuntu-22.04, target_id: linux-musl-x64, binary: omp-linux-musl-x64, alpine: true }
-               - { os: ubuntu-24.04-arm, target_id: linux-musl-arm64, binary: omp-linux-musl-arm64, alpine: true }
+               - { os: depot-ubuntu-22.04, target_id: linux-musl-x64, binary: omp-linux-musl-x64, alpine: true }
+               - { os: depot-ubuntu-24.04-arm, target_id: linux-musl-arm64, binary: omp-linux-musl-arm64, alpine: true }
                - { os: macos-15-intel, target_id: darwin-x64, binary: omp-darwin-x64 }
                - { os: macos-15, target_id: darwin-arm64, binary: omp-darwin-arm64 }
                - { os: windows-2025, target_id: win32-x64, binary: omp-windows-x64.exe }
@@ -961,7 +961,7 @@ jobs:
          needs.release_smoke.result == 'success' &&
          !inputs.skip_npm }}
       needs: [release_metadata, release_gate, release_binary, release_smoke]
-      runs-on: ubuntu-22.04
+      runs-on: depot-ubuntu-22.04
       # id-token lets npm mint the OIDC token for trusted publishing; the
       # NODE_AUTH_TOKEN below is the fallback for unconfigured packages.
       permissions:
@@ -1050,7 +1050,7 @@ jobs:
          needs.release_binary.result == 'success' &&
          needs.release_smoke.result == 'success' }}
       needs: [release_metadata, release_gate, release_binary, release_smoke]
-      runs-on: ubuntu-22.04
+      runs-on: depot-ubuntu-22.04
       permissions:
          contents: write
       steps:
@@ -1113,7 +1113,7 @@ jobs:
          needs.release_smoke.result == 'success' &&
          needs.release_github.result == 'success' }}
       needs: [release_metadata, release_gate, release_binary, release_smoke, release_github]
-      runs-on: ubuntu-22.04
+      runs-on: depot-ubuntu-22.04
       # `id-token: write` lets the upload mint the GitHub OIDC token (audience
       # build.stencil.so) the service authenticates the publisher with.
       permissions:
@@ -1153,7 +1153,7 @@ jobs:
       # binary updates install what build.stencil.so published (update-cli.ts),
       # and HTML exports load its pinned viewer, so the build service must lead npm.
       needs: [release_metadata, release_binary, release_smoke, release_build, release_native_leaves]
-      runs-on: ubuntu-22.04
+      runs-on: depot-ubuntu-22.04
       # `id-token: write` lets npm mint the GitHub OIDC token it exchanges for a
       # short-lived publish token (trusted publishing + provenance). When a
       # package has no matching trusted publisher configured, npm silently falls
@@ -1216,7 +1216,7 @@ jobs:
          needs.release_metadata.outputs.channel != 'canary' &&
          needs.release_build.result == 'success' }}
       needs: [release_metadata, release_build]
-      runs-on: ubuntu-22.04
+      runs-on: depot-ubuntu-22.04
       env:
          HAS_TAP_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY != '' }}
       steps:

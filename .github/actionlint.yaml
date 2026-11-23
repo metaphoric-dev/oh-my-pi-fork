@@ -1,6 +1,9 @@
-# actionlint only knows GitHub-hosted labels; register the vmon runner labels
-# (infra/docs/01-vmon-runners.md) so `runs-on: vmon-large/from=omp-ci` lints
+# actionlint only knows GitHub-hosted labels; register the custom runner
+# labels (infra/docs/01-vmon-runners.md, Depot runners) so `runs-on` lints
 # clean.
 self-hosted-runner:
    labels:
       - vmon-large/from=omp-ci
+      - depot-ubuntu-22.04
+      - depot-ubuntu-24.04-8
+      - depot-ubuntu-24.04-arm

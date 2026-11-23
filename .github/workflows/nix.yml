@@ -22,7 +22,7 @@ permissions:
 jobs:
   evaluate:
     name: Evaluate flake
-    runs-on: ubuntu-22.04
+    runs-on: depot-ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
@@ -38,7 +38,7 @@ jobs:
   # the link.
   build:
     name: Build package
-    runs-on: ubuntu-22.04
+    runs-on: depot-ubuntu-22.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
