@@ -1190,6 +1190,21 @@ async fn preview_prints_repeated_warnings_once() {
 	);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn preview_prints_pattern_warnings_once_across_files() {
+	let tree = tempfile::tempdir().unwrap();
+	std::fs::write(tree.path().join("c.js"), "const x = 123 + 456;\n").unwrap();
+	std::fs::write(tree.path().join("d.js"), "const y = 123 + 456;\n").unwrap();
+	let (code, _out, err) =
+		run(&tree, &["run", "-p", "123+", "-r", "ignored", "c.js", "d.js"]).await;
+	assert_eq!(code, 0, "{err}");
+	assert_eq!(
+		err.lines().filter(|line| line.contains("ERROR node")).count(),
+		1,
+		"pattern warnings print once across files: {err:?}"
+	);
+}
+
 	#[tokio::test(flavor = "multi_thread")]
 	async fn json_pretty_prints_match_array() {
 		let tree = tree();
