@@ -144,6 +144,12 @@ pub enum WebError {
 	/// Site-specific extraction failed.
 	#[error("failed to render web content: {0}")]
 	Render(Str),
+	/// A fetch target or redirect hop was blocked by the address guard.
+	#[error("blocked address: {host}")]
+	BlockedAddress {
+		/// Host of the blocked hop, as written or resolved.
+		host: Str,
+	},
 }
 
 impl WebError {

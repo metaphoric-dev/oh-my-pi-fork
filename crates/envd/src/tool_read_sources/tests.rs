@@ -458,3 +458,58 @@ async fn dropping_the_get_future_cancels_an_in_flight_stream() {
 		.expect("server body drop signal");
 	server.abort();
 }
+
+#[test]
+fn validate_http_url_refuses_refused_address_literals() {
+	for (url, want) in [
+		("http://169.254.169.254/latest/meta-data/", "169.254.169.254"),
+		("http://169.254.1.1/", "169.254.1.1"),
+		("http://0.0.0.0/", "0.0.0.0"),
+		("http://[::]/", "[::]"),
+		("http://[fe80::1]/", "[fe80::1]"),
+		("http://[ff02::1]/", "[ff02::1]"),
+		("http://255.255.255.255/", "255.255.255.255"),
+		("http://[::ffff:169.254.169.254]/", "[::ffff:a9fe:a9fe]"),
+	] {
+		let error = validate_http_url(&Url::parse(url).expect("parse refused URL"))
+			.expect_err("refused-class literal must be blocked before connecting");
+		assert!(
+			matches!(error, WebError::BlockedAddress { ref host } if host.as_str() == want),
+			"{url} must be refused as {want}"
+		);
+	}
+	// An operator-authored loopback or private first hop stays allowed; the
+	// guard blocks refused-class addresses and downgrades from a globally
+	// routable hop to a non-public one instead.
+	validate_http_url(&Url::parse("http://127.0.0.1:8080/dev").expect("parse loopback URL"))
+		.expect("loopback stays allowed");
+	validate_http_url(&Url::parse("http://localhost:8080/dev").expect("parse localhost URL"))
+		.expect("authored hostname stays allowed for its own first hop");
+}
+
+#[tokio::test]
+async fn refuses_authored_link_local_target() {
+	let error = SystemHttpClient::new()
+		.get(HttpRequest::new("http://169.254.169.254/latest/meta-data/"))
+		.await
+		.expect_err("authored metadata target must be refused");
+	assert!(matches!(error, WebError::BlockedAddress { ref host } if host.as_str() == "169.254.169.254"));
+}
+
+#[tokio::test]
+async fn refuses_redirect_to_link_local_literal() {
+	let server = serve(|_request| {
+		Response::builder()
+			.status(StatusCode::FOUND)
+			.header(LOCATION, "http://169.254.169.254/latest/meta-data/")
+			.body(Full::new(Bytes::new()))
+			.expect("link-local redirect response")
+	})
+	.await;
+
+	let error = SystemHttpClient::new()
+		.get(HttpRequest::new(format!("{}/start", server.base)))
+		.await
+		.expect_err("link-local redirect must be refused");
+	assert!(matches!(error, WebError::BlockedAddress { ref host } if host.as_str() == "169.254.169.254"));
+}

@@ -45,8 +45,7 @@ const MAX_REDIRECTS: usize = 20;
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(1);
 static READ_CLIENT: LazyLock<omp_http::Client> = LazyLock::new(|| {
-	omp_http::client_builder()
-		.redirect(redirect::Policy::limited(MAX_REDIRECTS))
+	omp_http::guarded_client_builder(MAX_REDIRECTS)
 		.referer(false)
 		.build()
 		.expect("build read HTTP client")
@@ -54,7 +53,6 @@ static READ_CLIENT: LazyLock<omp_http::Client> = LazyLock::new(|| {
 });
 
 use omp_cache::atomic;
-use reqwest::redirect;
 use thiserror::Error;
 use tokio::task;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -153,9 +151,13 @@ impl SystemHttpClient {
 			.map_err(|error| WebError::InvalidUrl(error.to_string().into()))?;
 		validate_http_url(&authored_url)?;
 		authored_url.set_fragment(None);
-		time::timeout(HTTP_TIMEOUT, self.request_with_retries(authored_url, request))
-			.await
-			.map_err(|_| WebError::request("request timed out after 30s"))?
+		let origin = omp_http::literal_address(&authored_url).map(omp_http::address_class);
+		time::timeout(
+			HTTP_TIMEOUT,
+			omp_http::address_guard_scope(origin, self.request_with_retries(authored_url, request)),
+		)
+		.await
+		.map_err(|_| WebError::request("request timed out after 30s"))?
 	}
 
 	async fn request_with_retries(
@@ -179,6 +181,9 @@ impl SystemHttpClient {
 				{
 					Ok(response) => response,
 					Err(error) => {
+						if let Some(blocked) = blocked_address(&error) {
+							return Err(WebError::BlockedAddress { host: blocked.host.clone() });
+						}
 						last_error = Some(WebError::request(error.to_string()));
 						break;
 					},
@@ -238,7 +243,23 @@ fn validate_http_url(url: &Url) -> Result<(), WebError> {
 	if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
 		return Err(WebError::InvalidUrl(url.as_str().into()));
 	}
+	if let Some(ip) = omp_http::literal_address(url)
+		&& omp_http::address_class(ip) == omp_http::AddressClass::Refused
+	{
+		return Err(WebError::BlockedAddress { host: url.host_str().unwrap_or_default().into() });
+	}
 	Ok(())
+}
+
+fn blocked_address(error: &reqwest::Error) -> Option<&omp_http::AddressGuardError> {
+	let mut source = std::error::Error::source(error);
+	while let Some(current) = source {
+		if let Some(blocked) = current.downcast_ref::<omp_http::AddressGuardError>() {
+			return Some(blocked);
+		}
+		source = current.source();
+	}
+	None
 }
 
 fn parse_request_headers(headers: &[(Str, Str)]) -> Result<HeaderMap, WebError> {
