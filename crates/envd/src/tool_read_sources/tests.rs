@@ -600,8 +600,11 @@ async fn refuses_refused_redirect_after_rate_limit_retry() {
 		matches!(error, WebError::BlockedAddress { ref host } if host.as_str() == "169.254.169.254")
 	);
 }
+
 /// A hostname-authored URL resolves its class up front inside the request:
 /// the loopback name takes the seeded path and still fetches normally.
+/// Loopback stays in one class, so this shows only that the seed does not
+/// over-block; the next test shows that the seed blocks.
 #[tokio::test]
 async fn fetches_hostname_authored_url_through_seeded_origin() {
 	let server = serve(|_request| {
@@ -616,5 +619,39 @@ async fn fetches_hostname_authored_url_through_seeded_origin() {
 		.get(HttpRequest::new(format!("http://localhost:{port}/start")))
 		.await
 		.expect("hostname-authored fetch must succeed");
+	assert_eq!(response.status, 200);
+}
+
+/// Every send runs under the authored origin's class: seeded as globally
+/// routable, a send whose name resolves to loopback is a downgrade and is
+/// refused, while the same send unseeded reaches the server. The retry loop
+/// has one send site, so a 429 resend carries the same seed.
+#[tokio::test]
+async fn seeds_every_send_with_the_authored_origin_class() {
+	let server = serve(|_request| {
+		Response::builder()
+			.status(StatusCode::OK)
+			.body(Full::new(Bytes::from_static(b"ok")))
+			.expect("seeded response")
+	})
+	.await;
+	let port = server.base.rsplit(':').next().expect("test server port");
+	let url = Url::parse(&format!("http://localhost:{port}/start")).expect("parse localhost URL");
+	let client = SystemHttpClient::new();
+
+	let error = client
+		.request_with_retries(
+			Some(omp_http::AddressClass::Global),
+			url.clone(),
+			HttpRequest::new(url.as_str()),
+		)
+		.await
+		.expect_err("a globally routable origin must not reach a loopback hop");
+	assert!(matches!(error, WebError::BlockedAddress { ref host } if host.as_str() == "localhost"));
+
+	let response = client
+		.request_with_retries(None, url.clone(), HttpRequest::new(url.as_str()))
+		.await
+		.expect("an unseeded send keeps its first hop");
 	assert_eq!(response.status, 200);
 }
