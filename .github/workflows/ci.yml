@@ -466,6 +466,17 @@ jobs:
          - uses: actions/checkout@v4
          - id: cache
            uses: ./.github/actions/bazel-cache
+         # Depot images track GitHub's, which ship versioned clang but no
+         # unversioned llvm-objdump (the vmon template installed `llvm` for
+         # that). Provision it before the expensive cross build so a missing
+         # tool fails here instead of at verification time.
+         - name: Install LLVM objdump for addon verification
+           run: |
+              set -euo pipefail
+              if ! command -v llvm-objdump >/dev/null 2>&1 && ! command -v llvm-objdump-18 >/dev/null 2>&1; then
+                sudo apt-get update -qq
+                sudo apt-get install -y -qq llvm
+              fi
          - name: Build cross-target native addons
            run: |
               set -eo pipefail
@@ -503,7 +514,8 @@ jobs:
               # on older macOS.
               grep -aqF OmpAppleFm "$addon" ||
                  { echo "::error::Darwin arm64 addon was built without the Apple Foundation Models bridge"; exit 1; }
-              dylibs="$(llvm-objdump --macho --dylibs-used "$addon")"
+              objdump="$(command -v llvm-objdump || command -v llvm-objdump-18)"
+              dylibs="$("$objdump" --macho --dylibs-used "$addon")"
               if grep -E 'libswift|FoundationModels' <<< "$dylibs"; then
                  echo "::error::Darwin arm64 addon links the Swift runtime or FoundationModels directly"; exit 1
               fi
