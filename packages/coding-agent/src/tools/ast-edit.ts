@@ -275,6 +275,7 @@ export class AstEditTool implements AgentTool<typeof astEditSchema, AstEditToolD
 			const scope = await resolveToolSearchScope({
 				rawPaths: params.paths,
 				cwd: this.session.cwd,
+				agentDir: this.session.settings.getAgentDir(),
 				internalUrlAction: "rewrite",
 				filesystem: urlFilesystem,
 				fileWritableOnly: true,
