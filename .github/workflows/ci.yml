@@ -318,8 +318,8 @@ jobs:
 
          # ---- PR path: main-built addons from actions/cache ----
          # `ci-natives` is a plain workspace-relative path on purpose: the
-         # cache version hashes the literal path list, so vmon (save) and
-         # hosted (restore) must spell it identically, and upload-artifact
+         # cache version hashes the literal path list, so main (save) and
+         # PR runs (restore) must spell it identically, and upload-artifact
          # skips dot-directories by default. Exact key only: a prefix hit is
          # a stale build for other native sources, not this commit's addons.
          - name: Restore main-built native addons
@@ -392,33 +392,22 @@ jobs:
                 "$PWD/ci-natives/natives-linux-x64-baseline/pi_natives.linux-x64-baseline.node" \
                 "$PWD/ci-natives/natives-linux-x64-modern/pi_natives.linux-x64-modern.node"
          # Only main saves, so one entry exists per native source revision.
-         # Depot Cache has no branch isolation; retention follows the
-         # organization's Depot cache policy instead of a ref quota.
          # Probe first so an existing entry is not re-uploaded. The steps
          # below run only on main (never exercised by PR or branch runs) and
          # are pure optimization for later PRs: a failure must never fail
-         # native_addons and with it every test job. Every Linux test job runs
-         # on Depot runners, whose actions/cache backend is Depot Cache, so the
-         # probe and save below address the same backend PR runs restore
-         # from; retention follows the Depot cache policy, not a two-entry
-         # limit. The two npm publishers are the exception: GitHub-hosted for
-         # OIDC trusted publishing, they keep their own entries in the GitHub
-         # cache, which this Depot entry never warms.
-         # There is deliberately no `gh cache` prune step: it would
-         # only see the GitHub namespace, never the Depot entries.
-         - name: Locate GitHub's cache service
-           id: gh-results
-           if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-           uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-           with:
-              script: core.setOutput("url", process.env.ACTIONS_RESULTS_ORL || process.env.ACTIONS_RESULTS_URL)
+         # native_addons and with it every test job. Like the PR restore
+         # above, they use the runner's default actions/cache backend: main
+         # and PR runs both run on Depot runners, so all three address Depot
+         # Cache, which has no branch isolation and whose retention follows
+         # the organization's Depot cache policy. No other job reads this
+         # entry; the npm publishers install the native_addons artifact.
+         # There is deliberately no `gh cache` prune step: it would only see
+         # the GitHub namespace, never the Depot entries.
          - name: Probe native addon cache entry
            id: natives-cache-probe
            if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
            continue-on-error: true
            uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-           env:
-              ACTIONS_RESULTS_URL: ${{ steps.gh-results.outputs.url }}
            with:
               path: ci-natives
               key: ${{ steps.natives-key.outputs.key }}
@@ -427,8 +416,6 @@ jobs:
            if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.natives-cache-probe.outputs.cache-hit != 'true'
            continue-on-error: true
            uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-           env:
-              ACTIONS_RESULTS_URL: ${{ steps.gh-results.outputs.url }}
            with:
               path: ci-natives
               key: ${{ steps.natives-key.outputs.key }}
