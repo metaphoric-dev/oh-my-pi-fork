@@ -17,9 +17,12 @@ import {
 } from "@oh-my-pi/pi-coding-agent/tools/browser/webmcp";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import { rejectionOf } from "../helpers/rejection";
-import { chromiumAvailable } from "./chromium-probe";
+import { chromiumAvailable, webmcpPageAvailable } from "./chromium-probe";
 
 const CHROMIUM_AVAILABLE = await chromiumAvailable();
+// Page-registered tools need the page API, not just the DevTools domain (see chromium-probe.ts);
+// without it these tests skip instead of failing.
+const WEBMCP_PAGE_AVAILABLE = CHROMIUM_AVAILABLE && (await webmcpPageAvailable());
 const BROWSER_TEST_TIMEOUT_MS = 30_000;
 
 // One headless Chromium for the file, held across it; the browser host's tabs open in it too. Each test closes the
@@ -86,11 +89,11 @@ function servePage(body: string): Bun.Server<undefined> {
 }
 
 describe.skipIf(!CHROMIUM_AVAILABLE)("browser WebMCP helpers", () => {
-	it(
+	it.skipIf(!WEBMCP_PAGE_AVAILABLE)(
 		"discovers, invokes, bounds trust, and reports native registrations",
 		async () => {
 			const invoke = createBrowserHost();
-			// localhost is a secure context, so Chromium exposes its own modelContext.
+			// localhost is a secure context, so a Chromium with the page API exposes its own modelContext here.
 			using server = servePage(`<title>loading</title>
 <form toolname="search_form" tooldescription="Searches the page."><input name="q"></form>
 <script>
@@ -179,7 +182,7 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser WebMCP helpers", () => {
 		BROWSER_TEST_TIMEOUT_MS,
 	);
 
-	it(
+	it.skipIf(!WEBMCP_PAGE_AVAILABLE)(
 		"leaves the page's globals and modelContext alone, before and after a webmcp helper runs",
 		async () => {
 			const invoke = createBrowserHost();
@@ -233,7 +236,7 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser WebMCP helpers", () => {
 		BROWSER_TEST_TIMEOUT_MS,
 	);
 
-	it(
+	it.skipIf(!WEBMCP_PAGE_AVAILABLE)(
 		"lists and invokes a tool a cross-origin iframe registers in its own process",
 		async () => {
 			const invoke = createBrowserHost();
@@ -272,7 +275,7 @@ document.modelContext.registerTool({
 		BROWSER_TEST_TIMEOUT_MS,
 	);
 
-	it(
+	it.skipIf(!WEBMCP_PAGE_AVAILABLE)(
 		"keeps a page alive whose same-site iframe is touched before it navigates",
 		async () => {
 			const invoke = createBrowserHost();
@@ -328,7 +331,7 @@ context.registerTool({
 		BROWSER_TEST_TIMEOUT_MS,
 	);
 
-	it(
+	it.skipIf(!WEBMCP_PAGE_AVAILABLE)(
 		"forgets a page's tools once it navigates and finds the next page's",
 		async () => {
 			using server = Bun.serve({
@@ -367,7 +370,7 @@ context.registerTool({
 		BROWSER_TEST_TIMEOUT_MS,
 	);
 
-	it(
+	it.skipIf(!WEBMCP_PAGE_AVAILABLE)(
 		"cancels the page's tool invocation when the call is aborted",
 		async () => {
 			using server = servePage(`<title>hang</title><script>
@@ -397,7 +400,7 @@ document.modelContext.registerTool({ name: "never_answers", description: "Hangs.
 		BROWSER_TEST_TIMEOUT_MS,
 	);
 
-	it(
+	it.skipIf(!WEBMCP_PAGE_AVAILABLE)(
 		"never starts the page's tool once the call is aborted",
 		async () => {
 			using server = servePage(`<title>idle</title><script>
@@ -419,7 +422,7 @@ document.modelContext.registerTool({ name: "rename_page", description: "Renames.
 		BROWSER_TEST_TIMEOUT_MS,
 	);
 
-	it(
+	it.skipIf(!WEBMCP_PAGE_AVAILABLE)(
 		"lists a same-process iframe's tools, registered before the first call, until the iframe navigates",
 		async () => {
 			const invoke = createBrowserHost();
@@ -491,7 +494,7 @@ document.modelContext.registerTool({ name: "child_tool", description: "Answers f
 		BROWSER_TEST_TIMEOUT_MS,
 	);
 
-	it(
+	it.skipIf(!WEBMCP_PAGE_AVAILABLE)(
 		"blames the Chrome version only when invokeTool itself is missing, not for another error saying something wasn't found",
 		async () => {
 			using server = servePage(`<title>tool</title><script>
