@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- Fixed `ast-grep` preview warnings to name the affected file and to print each distinct warning once ([#5](https://github.com/metaphoric-dev/oh-my-pi-fork/pull/5)).
+- Fixed `ast-grep` preview file-level warnings to name the affected file, and to print each distinct warning once; pattern-level warnings still carry no file name ([#5](https://github.com/metaphoric-dev/oh-my-pi-fork/pull/5)).
 
 ## [18.14.0] - 2026-10-29
 
