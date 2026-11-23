@@ -391,19 +391,18 @@ jobs:
               "$loader" "$RUNNER_TEMP/smoke-addons.js" \
                 "$PWD/ci-natives/natives-linux-x64-baseline/pi_natives.linux-x64-baseline.node" \
                 "$PWD/ci-natives/natives-linux-x64-modern/pi_natives.linux-x64-modern.node"
-         # Only main saves: an entry saved on any other ref is readable by
-         # that ref alone yet counts against the shared 10 GB repo quota,
-         # whose LRU eviction has already cost the darwin release archives.
-         # Probe first so an existing entry is not re-uploaded, then keep
-         # only the newest two entries so the footprint stays ~100 MB.
-         # The three steps below run only on main (never exercised by PR or
-         # branch runs) and are pure optimization for later PRs: a failure
-         # must never fail native_addons and with it every test job.
-         # PR runs restore this entry on GitHub-hosted runners, which read
-         # GitHub's cache; on vmon runners actions/cache goes to the node's
-         # local cache. The vmon runner hands GitHub's results URL to node
-         # actions (not run steps) as ACTIONS_RESULTS_ORL, so a script action
-         # looks it up and the probe and save below talk to GitHub.
+         # Only main saves, so one entry exists per native source revision.
+         # Depot Cache has no branch isolation; retention follows the
+         # organization's Depot cache policy instead of a ref quota.
+         # Probe first so an existing entry is not re-uploaded. The steps
+         # below run only on main (never exercised by PR or branch runs) and
+         # are pure optimization for later PRs: a failure must never fail
+         # native_addons and with it every test job. Every Linux job runs on
+         # Depot runners, whose actions/cache backend is Depot Cache, so the
+         # probe and save below address the same backend PR runs restore
+         # from; retention follows the Depot cache policy, not a two-entry
+         # limit. There is deliberately no `gh cache` prune step: it would
+         # only see the GitHub namespace, never the Depot entries.
          - name: Locate GitHub's cache service
            id: gh-results
            if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -430,20 +429,6 @@ jobs:
            with:
               path: ci-natives
               key: ${{ steps.natives-key.outputs.key }}
-         - name: Prune superseded native addon cache entries
-           if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.natives-cache-probe.outputs.cache-hit != 'true'
-           continue-on-error: true
-           shell: bash
-           env:
-              GH_TOKEN: ${{ github.token }}
-              PREFIX: ${{ steps.natives-key.outputs.prefix }}
-           run: |
-              # Best-effort: a failed prune leaves eviction to GitHub's LRU.
-              gh cache list --repo "$GITHUB_REPOSITORY" --ref refs/heads/main --key "$PREFIX" \
-                  --sort created_at --order desc --limit 100 --json id --jq '.[2:][].id' \
-                | while read -r id; do
-                    gh cache delete "$id" --repo "$GITHUB_REPOSITORY" || true
-                  done || true
 
          - name: Upload linux-x64 native addon artifact
            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
