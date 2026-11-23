@@ -513,3 +513,54 @@ async fn refuses_redirect_to_link_local_literal() {
 		.expect_err("link-local redirect must be refused");
 	assert!(matches!(error, WebError::BlockedAddress { ref host } if host.as_str() == "169.254.169.254"));
 }
+
+/// A 429 after a redirect retries the authored URL in a fresh guard scope: a
+/// public hop recorded by the first attempt must not poison the resend of a
+/// private origin with a blocked-address error.
+#[tokio::test]
+async fn retries_rate_limit_after_a_redirect_chain() {
+	let paths = Arc::new(Mutex::new(Vec::new()));
+	let seen = Arc::clone(&paths);
+	let limited = Arc::new(AtomicUsize::new(0));
+	let limited_calls = Arc::clone(&limited);
+	let server = serve(move |request| {
+		seen.lock().push(request.uri().to_string());
+		match request.uri().path() {
+			"/start" => Response::builder()
+				.status(StatusCode::FOUND)
+				.header(LOCATION, "/limited")
+				.body(Full::new(Bytes::new()))
+				.expect("redirect to the limited endpoint"),
+			"/limited" => {
+				if limited_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+					Response::builder()
+						.status(StatusCode::TOO_MANY_REQUESTS)
+						.header(RETRY_AFTER, "0")
+						.body(Full::new(Bytes::from_static(b"slow down")))
+						.expect("first rate-limit response")
+				} else {
+					Response::builder()
+						.status(StatusCode::OK)
+						.body(Full::new(Bytes::from_static(b"recovered")))
+						.expect("recovered response")
+				}
+			},
+			path => panic!("unexpected retry path {path}"),
+		}
+	})
+	.await;
+
+	let response = SystemHttpClient::new()
+		.get(HttpRequest::new(format!("{}/start", server.base)))
+		.await
+		.expect("retry after a redirect must succeed");
+
+	assert_eq!(response.status, 200);
+	assert_eq!(response.body, Bytes::from_static(b"recovered"));
+	assert_eq!(*paths.lock(), [
+		"/start".to_owned(),
+		"/limited".to_owned(),
+		"/start".to_owned(),
+		"/limited".to_owned(),
+	]);
+}

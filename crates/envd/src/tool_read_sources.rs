@@ -152,16 +152,14 @@ impl SystemHttpClient {
 		validate_http_url(&authored_url)?;
 		authored_url.set_fragment(None);
 		let origin = omp_http::literal_address(&authored_url).map(omp_http::address_class);
-		time::timeout(
-			HTTP_TIMEOUT,
-			omp_http::address_guard_scope(origin, self.request_with_retries(authored_url, request)),
-		)
-		.await
-		.map_err(|_| WebError::request("request timed out after 30s"))?
+		time::timeout(HTTP_TIMEOUT, self.request_with_retries(origin, authored_url, request))
+			.await
+			.map_err(|_| WebError::request("request timed out after 30s"))?
 	}
 
 	async fn request_with_retries(
 		&self,
+		origin: Option<omp_http::AddressClass>,
 		authored_url: Url,
 		request: HttpRequest,
 	) -> Result<HttpResponse, WebError> {
@@ -172,13 +170,15 @@ impl SystemHttpClient {
 
 		for (attempt, user_agent) in USER_AGENTS.iter().enumerate() {
 			loop {
-				let response = match self
+				// Each send runs in a fresh scope seeded from the authored URL:
+				// a public hop recorded by an earlier attempt must not block
+				// the retry of a private origin.
+				let send = self
 					.inner
 					.get(authored_url.as_str())
 					.headers(request_headers(user_agent, &caller_headers))
-					.send()
-					.await
-				{
+					.send();
+				let response = match omp_http::address_guard_scope(origin, send).await {
 					Ok(response) => response,
 					Err(error) => {
 						if let Some(blocked) = blocked_address(&error) {

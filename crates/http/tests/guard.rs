@@ -138,3 +138,52 @@ async fn caps_redirect_chain_at_the_limit() {
 	assert!(guard_error_of(&error).is_none());
 	assert!(error.is_redirect());
 }
+
+/// A retry that reuses a scope polluted by a public hop is refused: the
+/// resolver records the public class, and the re-resolved private origin is a
+/// downgrade from it. The URL reader therefore wraps every send in a fresh
+/// scope seeded from the authored URL instead of sharing one scope across
+/// retries.
+#[tokio::test]
+async fn shared_scope_blocks_private_resend_after_public_hop() {
+	let server = serve_response(OK_RESPONSE.to_owned()).await;
+	let client = guarded_client_builder(20)
+		.build()
+		.expect("build guarded client");
+	let url = format!("http://localhost:{}/start", server.port());
+	let error = address_guard_scope(Some(AddressClass::Global), async {
+		client
+			.get(&url)
+			.send()
+			.await
+			.expect_err("a stale public hop must block the private resend")
+	})
+	.await;
+	assert_eq!(guard_error_of(&error), Some("localhost".to_owned()));
+}
+
+/// Each retry send runs in a fresh scope seeded from the authored origin, so
+/// a public hop recorded by an earlier attempt cannot block the resend.
+#[tokio::test]
+async fn fresh_scope_per_send_retries_private_origin_after_public_hop() {
+	let server = serve_response(OK_RESPONSE.to_owned()).await;
+	let client = guarded_client_builder(20)
+		.build()
+		.expect("build guarded client");
+	let url = format!("http://localhost:{}/start", server.port());
+	let body = address_guard_scope(Some(AddressClass::Global), async {
+		address_guard_scope(None, async {
+			client
+				.get(&url)
+				.send()
+				.await
+				.expect("a fresh scope must retry the private origin")
+				.text()
+				.await
+				.expect("read retried body")
+		})
+		.await
+	})
+	.await;
+	assert_eq!(body, "ok");
+}
