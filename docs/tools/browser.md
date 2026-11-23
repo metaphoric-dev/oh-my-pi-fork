@@ -13,7 +13,6 @@ The Eval `browser` facade opens, reuses, scripts, and closes named Chromium, Ele
 - Relay: `packages/coding-agent/src/tools/browser/relay/`
 - Cmux backend: `packages/coding-agent/src/tools/browser/cmux/`
 - Tern backend: `packages/coding-agent/src/tools/browser/tern/`
-- Public helper types and options: `packages/coding-agent/src/tools/browser/declarations.d.ts`
 - Browser settings: `packages/coding-agent/src/tools/browser/settings.ts`
 
 The prelude exists only while Eval and `browser.enabled` are enabled (`browser.enabled` defaults to `true`). It is not an AgentTool.
@@ -72,7 +71,7 @@ Reopening with init scripts, a download directory, a user-agent override, or `ig
 
 ### Direct tab helpers
 
-Direct helpers cross the host bridge and return real structured values. The complete option types are in `browser/declarations.d.ts`.
+Direct helpers cross the host bridge and return real structured values.
 
 - Navigation: `url`, `title`, `goto`, `back`, `forward`, `reload`, `pushState` (SPA navigation without a document load).
 - Inspection: `observe({ includeAll?, viewportOnly?, selector?, compact? })`, `ariaSnapshot(selector?, { depth?, boxes?, interactive?, compact?, urls?, diff? })`, `a11y`, `screenshot`, `diffScreenshot`, `pdf`, `extract(format?, { selector?, outline?, filter? })`, `text`, `html`, `value`, `attr`, `count`, `box`, `styles`, `isVisible`, `isEnabled`, `isChecked`.
