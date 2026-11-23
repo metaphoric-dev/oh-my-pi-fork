@@ -162,7 +162,9 @@ impl SystemHttpClient {
 				Some(class) => Some(class),
 				None => omp_http::resolve_host_class(&authored_url).await,
 			};
-			self.request_with_retries(origin, authored_url, request).await
+			self
+				.request_with_retries(origin, authored_url, request)
+				.await
 		})
 		.await
 		.map_err(|_| WebError::request("request timed out after 30s"))?
