@@ -87,7 +87,7 @@
 		"test:scripts": "bun test scripts",
 		"test:rs": "bun scripts/run-rs-task.ts test:rs",
 		"check": "bun run --parallel check:ts check:rs",
-		"check:ts": "status=0; bun run check:tools || status=$?; bun run --filter './packages/*' --sequential --if-present check:types || status=$?; exit $status",
+		"check:ts": "status=0; bun run check:tools || status=$?; bun run --filter './packages/*' --sequential --no-exit-on-error --if-present check:types || status=$?; exit $status",
 		"check:tools": "status=0; oxlint . || status=$?; oxfmt --check 'packages/*/src/**/*.{ts,tsx}' 'packages/*/{test,bench,examples,scripts}/**/*.ts' 'packages/*/*.ts' 'scripts/**/*.ts' || status=$?; exit $status",
 		"check:rs": "bun scripts/run-rs-task.ts check:rs",
 		"lint": "bun run --parallel lint:ts lint:rs",

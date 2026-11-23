@@ -194,7 +194,7 @@ jobs:
            run: bun run check:tools
          - name: Type check workspace
            if: ${{ !cancelled() }}
-           run: bun run --filter './packages/*' --sequential --if-present check:types
+           run: bun run --filter './packages/*' --sequential --no-exit-on-error --if-present check:types
          - name: Build collab web
            if: ${{ !cancelled() }}
            run: bun run collab:web:build
