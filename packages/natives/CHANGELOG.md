@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- `htmlToMarkdown` with `cleanContent` again rejects HTML nested past 64 levels instead of converting it silently; html-to-markdown-rs 3.22 raised the default traversal limit to 1024.
+- `htmlToMarkdown` again rejects HTML nested deeper than 64 levels, with or without `cleanContent`, instead of converting it silently.
 
 ## [18.14.0] - 2026-10-29
 
