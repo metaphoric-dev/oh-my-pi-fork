@@ -662,28 +662,24 @@ mod chunks {
 	}
 	
 	impl<'a, R: Read + Seek> ReverseChunks<'a, R> {
-		pub fn new(file: &'a mut R) -> Self {
-			let current = if cfg!(unix) {
-				file.stream_position().unwrap()
-			} else {
-				0
-			};
-			let size = file.seek(SeekFrom::End(0)).unwrap() - current;
+		pub fn new(file: &'a mut R) -> io::Result<Self> {
+			let current = if cfg!(unix) { file.stream_position()? } else { 0 };
+			let size = file.seek(SeekFrom::End(0))? - current;
 			let max_blocks_to_read = (size as f64 / BLOCK_SIZE as f64).ceil() as usize;
 			let block_idx = 0;
-			ReverseChunks { file, size, max_blocks_to_read, block_idx }
+			Ok(ReverseChunks { file, size, max_blocks_to_read, block_idx })
 		}
 	}
 	
 	impl<R: Read + Seek> Iterator for ReverseChunks<'_, R> {
-		type Item = Vec<u8>;
-	
+		type Item = io::Result<Vec<u8>>;
+
 		fn next(&mut self) -> Option<Self::Item> {
 			// If there are no more chunks to read, terminate the iterator.
 			if self.block_idx >= self.max_blocks_to_read {
 				return None;
 			}
-	
+
 			// The chunk size is `BLOCK_SIZE` for all but the last chunk
 			// (that is, the chunk closest to the beginning of the file),
 			// which contains the remainder of the bytes. A file whose size is
@@ -695,27 +691,34 @@ mod chunks {
 			} else {
 				BLOCK_SIZE
 			};
-	
+
 			// Seek backwards by the next chunk, read the full chunk into
 			// `buf`, and then seek back to the start of the chunk again.
+			// Every I/O error (a cancelled read reports ECANCELED through the
+			// operation filesystem) ends the chunk walk as an error the caller
+			// reports; nothing here panics on cancellation.
 			let mut buf = vec![0; BLOCK_SIZE as usize];
-			let pos = self
-				.file
-				.seek(SeekFrom::Current(-(block_size as i64)))
-				.unwrap();
-			self
-				.file
-				.read_exact(&mut buf[0..(block_size as usize)])
-				.unwrap();
-			let pos2 = self
-				.file
-				.seek(SeekFrom::Current(-(block_size as i64)))
-				.unwrap();
-			assert_eq!(pos, pos2);
-	
+			let pos = match self.file.seek(SeekFrom::Current(-(block_size as i64))) {
+				Ok(pos) => pos,
+				Err(error) => return Some(Err(error)),
+			};
+			if let Err(error) = self.file.read_exact(&mut buf[0..(block_size as usize)]) {
+				return Some(Err(error));
+			}
+			let pos2 = match self.file.seek(SeekFrom::Current(-(block_size as i64))) {
+				Ok(pos) => pos,
+				Err(error) => return Some(Err(error)),
+			};
+			if pos != pos2 {
+				return Some(Err(io::Error::new(
+					io::ErrorKind::Other,
+					"tail: seek did not return to the chunk start",
+				)));
+			}
+
 			self.block_idx += 1;
-	
-			Some(buf[0..(block_size as usize)].to_vec())
+
+			Some(Ok(buf[0..(block_size as usize)].to_vec()))
 		}
 	}
 	
@@ -3708,51 +3711,57 @@ fn forwards_thru_file(
 	}
 }
 
-/// Iterate over bytes in the file, in reverse, until we find the
-/// `num_delimiters` instance of `delimiter`. The `file` is left seek'd to the
-/// position just after that delimiter.
-fn backwards_thru_file(file: &mut (impl Read + Seek), num_delimiters: u64, delimiter: u8) {
-	if num_delimiters == 0 {
-		file.seek(SeekFrom::End(0)).unwrap();
-		return;
-	}
-	// This variable counts the number of delimiters found in the file
-	// so far (reading from the end of the file toward the beginning).
-	let mut counter = 0;
-	let mut first_slice = true;
-	for slice in ReverseChunks::new(file) {
-		// Iterate over each byte in the slice in reverse order.
-		let mut iter = memrchr_iter(delimiter, &slice);
-
-		// Ignore a trailing newline in the last block, if there is one.
-		if first_slice {
-			if let Some(c) = slice.last()
-				&& *c == delimiter
-			{
-				iter.next();
-			}
-			first_slice = false;
+	/// Iterate over bytes in the file, in reverse, until we find the
+	/// `num_delimiters` instance of `delimiter`. The `file` is left seek'd to the
+	/// position just after that delimiter.
+	fn backwards_thru_file(
+		file: &mut (impl Read + Seek),
+		num_delimiters: u64,
+		delimiter: u8,
+	) -> io::Result<()> {
+		if num_delimiters == 0 {
+			file.seek(SeekFrom::End(0))?;
+			return Ok(());
 		}
+		// This variable counts the number of delimiters found in the file
+		// so far (reading from the end of the file toward the beginning).
+		let mut counter = 0;
+		let mut first_slice = true;
+		for slice in ReverseChunks::new(file)? {
+			let slice = slice?;
+			// Iterate over each byte in the slice in reverse order.
+			let mut iter = memrchr_iter(delimiter, &slice);
 
-		// For each byte, increment the count of the number of
-		// delimiters found. If we have found more than the specified
-		// number of delimiters, terminate the search and seek to the
-		// appropriate location in the file.
-		for i in iter {
-			counter += 1;
-			if counter >= num_delimiters {
-				// We should never over-count - assert that.
-				assert_eq!(counter, num_delimiters);
-				// After each iteration of the outer loop, the
-				// cursor in the file is at the *beginning* of the
-				// block, so seeking forward by `i + 1` bytes puts
-				// us right after the found delimiter.
-				file.seek_relative((i + 1) as i64).unwrap();
-				return;
+			// Ignore a trailing newline in the last block, if there is one.
+			if first_slice {
+				if let Some(c) = slice.last()
+					&& *c == delimiter
+				{
+					iter.next();
+				}
+				first_slice = false;
+			}
+
+			// For each byte, increment the count of the number of
+			// delimiters found. If we have found more than the specified
+			// number of delimiters, terminate the search and seek to the
+			// appropriate location in the file.
+			for i in iter {
+				counter += 1;
+				if counter >= num_delimiters {
+					// We should never over-count - assert that.
+					assert_eq!(counter, num_delimiters);
+					// After each iteration of the outer loop, the
+					// cursor in the file is at the *beginning* of the
+					// block, so seeking forward by `i + 1` bytes puts
+					// us right after the found delimiter.
+					file.seek_relative((i + 1) as i64)?;
+					return Ok(());
+				}
 			}
 		}
+		Ok(())
 	}
-}
 
 /// When tail'ing a file, we do not need to read the whole file from start to
 /// finish just to find the last n lines or bytes. Instead, we can seek to the
@@ -3770,28 +3779,28 @@ fn bounded_tail(
 	// Find the position in the file to start printing from.
 	match &settings.mode {
 		FilterMode::Lines(Signum::Negative(count), delimiter) => {
-			backwards_thru_file(file, *count, *delimiter);
+			backwards_thru_file(file, *count, *delimiter)?;
 		},
 		FilterMode::Lines(Signum::Positive(count), delimiter) if count > &1 => {
-			let i = forwards_thru_file(file, *count - 1, *delimiter).unwrap();
-			file.seek(SeekFrom::Start(i as u64)).unwrap();
+			let i = forwards_thru_file(file, *count - 1, *delimiter)?;
+			file.seek(SeekFrom::Start(i as u64))?;
 		},
 		FilterMode::Lines(Signum::MinusZero, _) => {
-			file.seek(SeekFrom::End(0)).unwrap();
+			file.seek(SeekFrom::End(0))?;
 		},
 		FilterMode::Bytes(Signum::Negative(count)) => {
 			if file.seek(SeekFrom::End(-(*count as i64))).is_err() {
-				file.seek(SeekFrom::Start(0)).unwrap();
+				file.seek(SeekFrom::Start(0))?;
 			}
 			limit = Some(*count);
 		},
 		FilterMode::Bytes(Signum::Positive(count)) if count > &1 => {
 			// GNU `tail` seems to index bytes and lines starting at 1, not
 			// at 0. It seems to treat `+0` and `+1` as the same thing.
-			file.seek(SeekFrom::Start(*count - 1)).unwrap();
+			file.seek(SeekFrom::Start(*count - 1))?;
 		},
 		FilterMode::Bytes(Signum::MinusZero) => {
-			file.seek(SeekFrom::End(0)).unwrap();
+			file.seek(SeekFrom::End(0))?;
 		},
 		_ => {},
 	}

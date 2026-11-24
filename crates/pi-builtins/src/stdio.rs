@@ -585,7 +585,8 @@ mod descriptor {
 
 		fn register(fd: OwnedFd, gated: bool) -> Result<Self, OwnedFd> {
 			let eof_unreported = is_named_fifo(fd.as_fd());
-			match AsyncFd::try_new(fd) {
+			// SAFETY: AsyncFd owns this descriptor and keeps it open and unchanged until deregistration.
+			match unsafe { AsyncFd::register(fd) } {
 				Ok(afd) => Ok(Self { afd, gated, eof_unreported }),
 				Err(error) => Err(error.into_parts().0),
 			}

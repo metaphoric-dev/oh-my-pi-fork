@@ -1033,6 +1033,7 @@ mod tests {
 		else {
 			return;
 		};
+		let advertised = reference_daemon_protocol(rsync);
 		let dir = tempfile::tempdir().unwrap();
 		let root = dir.path();
 		std::fs::create_dir(root.join("data")).unwrap();
@@ -1112,7 +1113,8 @@ mod tests {
 		let good = |key: &str| (key == "RSYNC_PASSWORD").then(|| "s3cr3t pw".to_owned());
 		let cfg = DaemonConfig { getenv: &good, ..base_cfg(&args, &fs) };
 		let session = daemon_handshake(&mut conn, &cfg, &logger).unwrap();
-		assert_eq!(session.remote_protocol, 33);
+		assert_eq!(session.remote_protocol, advertised);
+		assert_eq!(session.protocol, advertised.min(33));
 		assert_eq!(session.auth_digest, Some(AuthDigest::Sha512));
 		assert!(!session.exited);
 		// After OK + args the daemon starts the binary protocol: compat flags
@@ -1136,6 +1138,26 @@ mod tests {
 			.arg("--version")
 			.output()
 			.is_ok_and(|out| String::from_utf8_lossy(&out.stdout).starts_with("rsync  version 3."))
+	}
+
+	/// The protocol the reference daemon speaks, from `rsync --version`
+	/// (`rsync  version 3.4.1  protocol version 32`). The live test compares
+	/// the session against this advertisement instead of a constant, so it
+	/// holds wherever the host rsync speaks another protocol; the negotiated
+	/// session protocol is then the minimum of ours (33 in `base_cfg`) and this.
+	#[cfg(unix)]
+	fn reference_daemon_protocol(rsync: &Path) -> u32 {
+		let output = std::process::Command::new(rsync)
+			.arg("--version")
+			.output()
+			.expect("reference rsync --version runs");
+		let stdout = String::from_utf8_lossy(&output.stdout);
+		stdout
+			.split("protocol version")
+			.nth(1)
+			.and_then(|tail| tail.split_whitespace().next())
+			.and_then(|version| version.parse().ok())
+			.expect("reference rsync --version reports its protocol version")
 	}
 
 	#[test]
