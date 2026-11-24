@@ -46,6 +46,9 @@ pub fn html_to_markdown(
 		let conversion_opts = ConversionOptions {
 			skip_images,
 			hidden_content,
+			// html-to-markdown-rs 3.22 raised the default depth from 64 to 1024;
+			// pin the contract the depth test asserts.
+			max_depth: Some(64),
 			preprocessing: PreprocessingOptions {
 				enabled:           clean_content,
 				preset:            PreprocessingPreset::Aggressive,
