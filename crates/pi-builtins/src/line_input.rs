@@ -97,8 +97,9 @@ impl LineInput {
 			if !pi_vfs::fd_reads_can_block(fd) || readable_now(fd)? {
 				return Ok(());
 			}
-			// A descriptor the reactor cannot watch is read as before.
-			let Ok(watched) = AsyncFd::with_interest(fd.try_clone_to_owned()?, Interest::READABLE) else {
+			let fd = fd.try_clone_to_owned()?;
+			// SAFETY: AsyncFd owns this descriptor and keeps it open and unchanged until deregistration.
+			let Ok(watched) = (unsafe { AsyncFd::register_with_interest(fd, Interest::READABLE) }) else {
 				return Ok(());
 			};
 			let readable = async {
