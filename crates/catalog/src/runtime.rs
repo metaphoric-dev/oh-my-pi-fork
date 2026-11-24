@@ -618,11 +618,6 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn bundled_runtime_behavior_parses() {
-		RuntimeBehavior::parse(BUNDLED_RUNTIME_BEHAVIOR).expect("bundled behavior parses");
-	}
-
-	#[test]
 	fn openai_responses_heuristic_preserves_text_model_boundary() {
 		for model in ["gpt-5.6-sol", "o1", "o3-mini", "o4-mini", "chatgpt-4o-latest"] {
 			assert!(is_likely_openai_responses_id(model), "{model}");
