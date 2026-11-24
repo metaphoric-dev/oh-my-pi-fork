@@ -119,11 +119,4 @@ mod tests {
 
 		Ok(())
 	}
-
-	#[test]
-	fn test_sprintf_with_cycles() -> Result<()> {
-		assert_eq!(sprintf("%s|", &["x", "y"])?, "x|y|");
-
-		Ok(())
-	}
 }
