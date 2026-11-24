@@ -4,6 +4,11 @@ import * as path from "node:path";
 import { findFreeCdpPort, waitForCdp } from "@oh-my-pi/pi-coding-agent/tools/browser/attach";
 import { type ChildProcess, ptree } from "@oh-my-pi/pi-utils";
 import { ensureChromiumExecutable } from "@oh-my-pi/pi-coding-agent/tools/browser/launch";
+import {
+	acquireBrowser,
+	releaseBrowser,
+	type PuppeteerBrowserHandle,
+} from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
 
 /**
  * Whether the Chromium puppeteer resolves can actually execute on this host.
@@ -116,4 +121,55 @@ export function visibleBrowserAvailable(): Promise<boolean> {
 		return Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
 	})();
 	return visibleProbe;
+}
+
+let webmcpProbe: Promise<boolean> | undefined;
+
+/**
+ * Gate for tests that need Chrome to expose WebMCP to the page itself
+ * (`document.modelContext` or `navigator.modelContext` on a secure context),
+ * not just the DevTools WebMCP domain:
+ *
+ *     const WEBMCP_PAGE_AVAILABLE = CHROMIUM_AVAILABLE && (await webmcpPageAvailable());
+ *     it.skipIf(!WEBMCP_PAGE_AVAILABLE)(…);
+ *
+ * Chromium 157 removed `WebMCPTesting`, which used to imply `WebMCP`, so a
+ * headless Chromium launched without `--enable-features=WebMCP` still answers
+ * the WebMCP DevTools domain but exposes no page API, and every test that
+ * registers a page tool fails instead of skipping. Probe the launched browser
+ * once per process; a launch or evaluation failure reads as unavailable,
+ * never as a failure.
+ *
+ * Same promise-not-awaited-const shape as `chromiumAvailable()`, for the same
+ * temporal-dead-zone reason.
+ */
+export function webmcpPageAvailable(): Promise<boolean> {
+	webmcpProbe ??= (async () => {
+		let server: Bun.Server<undefined> | undefined;
+		let handle: PuppeteerBrowserHandle | undefined;
+		try {
+			const launched = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			if (!("browser" in launched)) return false;
+			handle = launched;
+			server = Bun.serve({
+				port: 0,
+				hostname: "localhost",
+				fetch: () =>
+					new Response("<!doctype html><title>probe</title>", { headers: { "content-type": "text/html" } }),
+			});
+			const page = await handle.browser.newPage();
+			try {
+				await page.goto(`http://localhost:${server.port}/`);
+				return await page.evaluate(() => "modelContext" in document || "modelContext" in navigator);
+			} finally {
+				await page.close().catch(() => undefined);
+			}
+		} catch {
+			return false;
+		} finally {
+			if (server) await server.stop(true);
+			if (handle) await releaseBrowser(handle, { kill: true });
+		}
+	})();
+	return webmcpProbe;
 }
