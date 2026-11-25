@@ -458,3 +458,200 @@ async fn dropping_the_get_future_cancels_an_in_flight_stream() {
 		.expect("server body drop signal");
 	server.abort();
 }
+
+#[test]
+fn validate_http_url_refuses_refused_address_literals() {
+	for (url, want) in [
+		("http://169.254.169.254/latest/meta-data/", "169.254.169.254"),
+		("http://169.254.1.1/", "169.254.1.1"),
+		("http://0.0.0.0/", "0.0.0.0"),
+		("http://[::]/", "[::]"),
+		("http://[fe80::1]/", "[fe80::1]"),
+		("http://[ff02::1]/", "[ff02::1]"),
+		("http://255.255.255.255/", "255.255.255.255"),
+		("http://[::ffff:169.254.169.254]/", "[::ffff:a9fe:a9fe]"),
+	] {
+		let error = validate_http_url(&Url::parse(url).expect("parse refused URL"))
+			.expect_err("refused-class literal must be blocked before connecting");
+		assert!(
+			matches!(error, WebError::BlockedAddress { ref host } if host.as_str() == want),
+			"{url} must be refused as {want}"
+		);
+	}
+	// An operator-authored loopback or private first hop stays allowed; the
+	// guard blocks refused-class addresses and downgrades from a globally
+	// routable hop to a non-public one instead.
+	validate_http_url(&Url::parse("http://127.0.0.1:8080/dev").expect("parse loopback URL"))
+		.expect("loopback stays allowed");
+	validate_http_url(&Url::parse("http://localhost:8080/dev").expect("parse localhost URL"))
+		.expect("authored hostname stays allowed for its own first hop");
+}
+
+#[tokio::test]
+async fn refuses_authored_link_local_target() {
+	let error = SystemHttpClient::new()
+		.get(HttpRequest::new("http://169.254.169.254/latest/meta-data/"))
+		.await
+		.expect_err("authored metadata target must be refused");
+	assert!(matches!(error, WebError::BlockedAddress { ref host } if host.as_str() == "169.254.169.254"));
+}
+
+#[tokio::test]
+async fn refuses_redirect_to_link_local_literal() {
+	let server = serve(|_request| {
+		Response::builder()
+			.status(StatusCode::FOUND)
+			.header(LOCATION, "http://169.254.169.254/latest/meta-data/")
+			.body(Full::new(Bytes::new()))
+			.expect("link-local redirect response")
+	})
+	.await;
+
+	let error = SystemHttpClient::new()
+		.get(HttpRequest::new(format!("{}/start", server.base)))
+		.await
+		.expect_err("link-local redirect must be refused");
+	assert!(matches!(error, WebError::BlockedAddress { ref host } if host.as_str() == "169.254.169.254"));
+}
+
+/// A 429 after a redirect retries the authored URL, not the redirect target:
+/// the resend replays the redirect chain, so the path sequence repeats. The
+/// loopback fixture stays inside one class; the public-hop scope behavior is
+/// pinned by the address guard's own scope tests instead.
+#[tokio::test]
+async fn retries_rate_limit_after_a_redirect_chain() {
+	let paths = Arc::new(Mutex::new(Vec::new()));
+	let seen = Arc::clone(&paths);
+	let limited = Arc::new(AtomicUsize::new(0));
+	let limited_calls = Arc::clone(&limited);
+	let server = serve(move |request| {
+		seen.lock().push(request.uri().to_string());
+		match request.uri().path() {
+			"/start" => Response::builder()
+				.status(StatusCode::FOUND)
+				.header(LOCATION, "/limited")
+				.body(Full::new(Bytes::new()))
+				.expect("redirect to the limited endpoint"),
+			"/limited" => {
+				if limited_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+					Response::builder()
+						.status(StatusCode::TOO_MANY_REQUESTS)
+						.header(RETRY_AFTER, "0")
+						.body(Full::new(Bytes::from_static(b"slow down")))
+						.expect("first rate-limit response")
+				} else {
+					Response::builder()
+						.status(StatusCode::OK)
+						.body(Full::new(Bytes::from_static(b"recovered")))
+						.expect("recovered response")
+				}
+			},
+			path => panic!("unexpected retry path {path}"),
+		}
+	})
+	.await;
+
+	let response = SystemHttpClient::new()
+		.get(HttpRequest::new(format!("{}/start", server.base)))
+		.await
+		.expect("retry after a redirect must succeed");
+
+	assert_eq!(response.status, 200);
+	assert_eq!(response.body, Bytes::from_static(b"recovered"));
+	assert_eq!(*paths.lock(), [
+		"/start".to_owned(),
+		"/limited".to_owned(),
+		"/start".to_owned(),
+		"/limited".to_owned(),
+	]);
+}
+
+/// A rate-limited first attempt does not launder the retry: when the resend
+/// replays into a redirect to a refused literal, the guard still refuses it.
+#[tokio::test]
+async fn refuses_refused_redirect_after_rate_limit_retry() {
+	let limited = Arc::new(AtomicUsize::new(0));
+	let limited_calls = Arc::clone(&limited);
+	let server = serve(move |request| match request.uri().path() {
+		"/start" => {
+			if limited_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+				Response::builder()
+					.status(StatusCode::TOO_MANY_REQUESTS)
+					.header(RETRY_AFTER, "0")
+					.body(Full::new(Bytes::from_static(b"slow down")))
+					.expect("first rate-limit response")
+			} else {
+				Response::builder()
+					.status(StatusCode::FOUND)
+					.header(LOCATION, "http://169.254.169.254/latest/meta-data/")
+					.body(Full::new(Bytes::new()))
+					.expect("redirect to the refused literal")
+			}
+		},
+		path => panic!("unexpected retry path {path}"),
+	})
+	.await;
+
+	let error = SystemHttpClient::new()
+		.get(HttpRequest::new(format!("{}/start", server.base)))
+		.await
+		.expect_err("refused redirect after a retry must stay refused");
+	assert!(
+		matches!(error, WebError::BlockedAddress { ref host } if host.as_str() == "169.254.169.254")
+	);
+}
+
+/// A hostname-authored URL resolves its class up front inside the request:
+/// the loopback name takes the seeded path and still fetches normally.
+/// Loopback stays in one class, so this shows only that the seed does not
+/// over-block; the next test shows that the seed blocks.
+#[tokio::test]
+async fn fetches_hostname_authored_url_through_seeded_origin() {
+	let server = serve(|_request| {
+		Response::builder()
+			.status(StatusCode::OK)
+			.body(Full::new(Bytes::from_static(b"ok")))
+			.expect("hostname response")
+	})
+	.await;
+	let port = server.base.rsplit(':').next().expect("test server port");
+	let response = SystemHttpClient::new()
+		.get(HttpRequest::new(format!("http://localhost:{port}/start")))
+		.await
+		.expect("hostname-authored fetch must succeed");
+	assert_eq!(response.status, 200);
+}
+
+/// Every send runs under the authored origin's class: seeded as globally
+/// routable, a send whose name resolves to loopback is a downgrade and is
+/// refused, while the same send unseeded reaches the server. The retry loop
+/// has one send site, so a 429 resend carries the same seed.
+#[tokio::test]
+async fn seeds_every_send_with_the_authored_origin_class() {
+	let server = serve(|_request| {
+		Response::builder()
+			.status(StatusCode::OK)
+			.body(Full::new(Bytes::from_static(b"ok")))
+			.expect("seeded response")
+	})
+	.await;
+	let port = server.base.rsplit(':').next().expect("test server port");
+	let url = Url::parse(&format!("http://localhost:{port}/start")).expect("parse localhost URL");
+	let client = SystemHttpClient::new();
+
+	let error = client
+		.request_with_retries(
+			Some(omp_http::AddressClass::Global),
+			url.clone(),
+			HttpRequest::new(url.as_str()),
+		)
+		.await
+		.expect_err("a globally routable origin must not reach a loopback hop");
+	assert!(matches!(error, WebError::BlockedAddress { ref host } if host.as_str() == "localhost"));
+
+	let response = client
+		.request_with_retries(None, url.clone(), HttpRequest::new(url.as_str()))
+		.await
+		.expect("an unseeded send keeps its first hop");
+	assert_eq!(response.status, 200);
+}

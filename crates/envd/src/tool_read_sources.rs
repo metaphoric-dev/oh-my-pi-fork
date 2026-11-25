@@ -45,8 +45,7 @@ const MAX_REDIRECTS: usize = 20;
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(1);
 static READ_CLIENT: LazyLock<omp_http::Client> = LazyLock::new(|| {
-	omp_http::client_builder()
-		.redirect(redirect::Policy::limited(MAX_REDIRECTS))
+	omp_http::guarded_client_builder(MAX_REDIRECTS)
 		.referer(false)
 		.build()
 		.expect("build read HTTP client")
@@ -54,7 +53,6 @@ static READ_CLIENT: LazyLock<omp_http::Client> = LazyLock::new(|| {
 });
 
 use omp_cache::atomic;
-use reqwest::redirect;
 use thiserror::Error;
 use tokio::task;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -153,13 +151,28 @@ impl SystemHttpClient {
 			.map_err(|error| WebError::InvalidUrl(error.to_string().into()))?;
 		validate_http_url(&authored_url)?;
 		authored_url.set_fragment(None);
-		time::timeout(HTTP_TIMEOUT, self.request_with_retries(authored_url, request))
-			.await
-			.map_err(|_| WebError::request("request timed out after 30s"))?
+		// Seed every send of this request with the authored host's class: a retry
+		// re-resolves the name, and an unseeded retry would admit a public hostname
+		// that re-resolves private as an unrecorded first hop. Literals classify
+		// directly; names resolve once up front inside the request timeout, so a
+		// stalled resolver fails the request instead of shedding the seed. Only
+		// an unresolvable or mixed-class name falls back to unseeded.
+		time::timeout(HTTP_TIMEOUT, async {
+			let origin = match omp_http::literal_address(&authored_url).map(omp_http::address_class) {
+				Some(class) => Some(class),
+				None => omp_http::resolve_host_class(&authored_url).await,
+			};
+			self
+				.request_with_retries(origin, authored_url, request)
+				.await
+		})
+		.await
+		.map_err(|_| WebError::request("request timed out after 30s"))?
 	}
 
 	async fn request_with_retries(
 		&self,
+		origin: Option<omp_http::AddressClass>,
 		authored_url: Url,
 		request: HttpRequest,
 	) -> Result<HttpResponse, WebError> {
@@ -170,15 +183,20 @@ impl SystemHttpClient {
 
 		for (attempt, user_agent) in USER_AGENTS.iter().enumerate() {
 			loop {
-				let response = match self
+				// Each send runs in a fresh scope seeded from the authored URL:
+				// a public hop recorded by an earlier attempt must not block
+				// the retry of a private origin.
+				let send = self
 					.inner
 					.get(authored_url.as_str())
 					.headers(request_headers(user_agent, &caller_headers))
-					.send()
-					.await
-				{
+					.send();
+				let response = match omp_http::address_guard_scope(origin, send).await {
 					Ok(response) => response,
 					Err(error) => {
+						if let Some(blocked) = blocked_address(&error) {
+							return Err(WebError::BlockedAddress { host: blocked.host.clone() });
+						}
 						last_error = Some(WebError::request(error.to_string()));
 						break;
 					},
@@ -238,7 +256,23 @@ fn validate_http_url(url: &Url) -> Result<(), WebError> {
 	if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
 		return Err(WebError::InvalidUrl(url.as_str().into()));
 	}
+	if let Some(ip) = omp_http::literal_address(url)
+		&& omp_http::address_class(ip) == omp_http::AddressClass::Refused
+	{
+		return Err(WebError::BlockedAddress { host: url.host_str().unwrap_or_default().into() });
+	}
 	Ok(())
+}
+
+fn blocked_address(error: &reqwest::Error) -> Option<&omp_http::AddressGuardError> {
+	let mut source = std::error::Error::source(error);
+	while let Some(current) = source {
+		if let Some(blocked) = current.downcast_ref::<omp_http::AddressGuardError>() {
+			return Some(blocked);
+		}
+		source = current.source();
+	}
+	None
 }
 
 fn parse_request_headers(headers: &[(Str, Str)]) -> Result<HeaderMap, WebError> {
