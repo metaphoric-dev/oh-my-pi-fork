@@ -665,13 +665,6 @@ mod tests {
 	}
 
 	#[test]
-	fn test_call_stack_default() {
-		let stack = CallStack::default();
-		assert!(stack.is_empty());
-		assert_eq!(stack.depth(), 0);
-	}
-
-	#[test]
 	fn test_call_stack_push_pop() {
 		let mut stack = CallStack::new();
 

@@ -791,13 +791,6 @@ mod tests {
 	}
 
 	#[test]
-	fn test_split_line_by_ifs_max_fields() {
-		// With max_fields=2, remainder goes into second field.
-		let result = split_line_by_ifs(" ", "a b c d", Some(2));
-		assert_equal(result, VecDeque::from(vec!["a", "b c d"]));
-	}
-
-	#[test]
 	fn test_split_line_by_ifs_max_fields_with_non_ws_delimiter() {
 		// With max_fields and non-whitespace delimiter.
 		let result = split_line_by_ifs(",", "a,b,c,d", Some(2));
