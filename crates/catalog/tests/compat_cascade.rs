@@ -202,11 +202,6 @@ fn axis_vocabulary_is_literal_pi_parity() {
 }
 
 #[test]
-fn every_pi_rule_file_compiles_under_the_closed_vocabulary() {
-	CompatCascade::bundled().expect("every bundled class/provider rule uses the closed vocabulary");
-}
-
-#[test]
 fn cca_gemini_three_requires_only_the_first_call_signature_bypass() {
 	let cascade = CompatCascade::bundled().expect("bundled cascade parses");
 	for provider in ["google-antigravity", "google-gemini-cli"] {
